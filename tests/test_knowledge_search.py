@@ -178,6 +178,7 @@ class StubRetriever(KnowledgeRetriever):
         *,
         limit: int,
         ctx: AgentContext,
+        context_chunks: int = 0,
     ) -> list[Evidence]:
         self.calls.append((list(queries), limit))
         self.contexts.append(ctx)
@@ -191,6 +192,7 @@ class FailingRetriever(KnowledgeRetriever):
         *,
         limit: int,
         ctx: AgentContext,
+        context_chunks: int = 0,
     ) -> list[Evidence]:
         raise RuntimeError("Qdrant unavailable")
 
@@ -202,6 +204,7 @@ class BlockingRetriever(KnowledgeRetriever):
         *,
         limit: int,
         ctx: AgentContext,
+        context_chunks: int = 0,
     ) -> list[Evidence]:
         await asyncio.Event().wait()
         return []
@@ -243,10 +246,18 @@ class StubDocumentIndex:
         documents: list[ContextualChunk],
         *,
         events: list[str] | None = None,
+        stored: list[ContextualChunk] | None = None,
     ) -> None:
         self.documents = documents
         self.events = events
+        #: Every live chunk of the indexed documents, for context reads.
+        self.stored = stored or []
         self.calls: list[dict[str, object]] = []
+        self.context_reads: list[dict[str, list[int]]] = []
+
+    async def get_item_chunks(self, *, tenant_id: str, chunks) -> list[ContextualChunk]:
+        self.context_reads.append({item: sorted(indexes) for item, indexes in chunks.items()})
+        return [c for c in self.stored if c.chunk_index in chunks.get(c.item_id, ())]
 
     async def search_item_content(
         self,
@@ -257,6 +268,7 @@ class StubDocumentIndex:
         collection_item_ids: tuple[str, ...],
         editable_collection_ids: tuple[str, ...],
         document_item_ids: tuple[str, ...] = (),
+        within_item_ids: tuple[str, ...] | None = None,
     ) -> list[ContextualChunk]:
         if self.events is not None:
             self.events.append("index")
@@ -331,6 +343,7 @@ class StubIndexBackend:
         document_item_ids: tuple[str, ...],
         limit: int,
         candidate_limit: int,
+        within_item_ids: tuple[str, ...] | None = None,
     ) -> list[object]:
         self.calls.append(
             (
@@ -957,11 +970,11 @@ async def test_query_embedding_cache_is_bounded_and_can_be_disabled() -> None:
 def test_context_builder_is_bounded_deduplicated_and_canonical() -> None:
     evidence = _evidence(DOCUMENT)
     built = EvidenceContextBuilder(
-        max_characters=700,
+        max_characters=800,
         max_evidence_characters=200,
     ).build([evidence, evidence])
 
-    assert len(built.text) <= 700
+    assert len(built.text) <= 800
     assert built.evidence == (evidence,)
     assert built.text.count(f"Source reference: {evidence.id}") == 1
     assert built.text.count(f"Document ID: {evidence.item_id}") == 1
@@ -1145,3 +1158,177 @@ def test_annotation_carries_the_issued_target_and_never_a_model_supplied_id() ->
             "original_url": "https://knowledge.example/leave-policy",
         }
     ]
+
+
+def test_an_issued_reference_without_its_cite_prefix_is_still_that_citation() -> None:
+    """Models sometimes write ``[[ref_1]]``: it is the citation, never prose, even split over deltas."""
+
+    references = CitationReferences()
+    reference = references.reference(DOC_1, "chunk-1")
+    evidence = {reference: replace(_cited(DOC_1, "chunk-1", ("texts/3",)), id=reference)}
+    projection = CitationProjection(evidence, workspace_id="ws-1", references=references)
+    projected = [
+        event
+        for delta in ("Leave is 20 days [[re", "f_1]", "]; see [[ref_9]] and [[a b]].")
+        for event in projection.project(
+            ResponseOutputTextDeltaEvent(item_id="msg", output_index=0, content_index=0, delta=delta)
+        )
+    ]
+    done = projection.project(ResponseOutputTextDoneEvent(item_id="msg", output_index=0, content_index=0, text=""))
+
+    # An unissued bare reference is not a citation: shown as written, like any bracketed text.
+    assert done[-1].text == "Leave is 20 days [1]; see [[ref_9]] and [[a b]]."
+    cited = [e.annotation["citation"]["refs"] for e in projected if isinstance(e, ResponseOutputTextAnnotationAddedEvent)]
+    assert cited == [["texts/3"]]
+
+
+# -- Context around matches ----------------------------------------------------------------------
+
+
+def _part(
+    index: int,
+    text: str,
+    *,
+    location: str = "Annual leave",
+    score: float | None = None,
+    highlights: tuple[Highlight, ...] = (),
+) -> ContextualChunk:
+    return _chunk(chunk_id=f"{DOC_1}:{index}").model_copy(
+        update={
+            "chunk_index": index,
+            "chunk_text": text,
+            "location": location,
+            "highlights": highlights,
+            "relevance_score": score,
+        }
+    )
+
+
+def _texts(parts: tuple[Evidence, ...]) -> list[str]:
+    return [part.content for part in parts]
+
+
+@pytest.mark.asyncio
+async def test_a_match_brings_its_neighbours_under_the_same_heading() -> None:
+    stored = [
+        _part(0, "Overview text", location="Overview"),
+        _part(1, "Before"),
+        _part(2, "Match", score=0.9),
+        _part(3, "After"),
+        _part(4, "Further"),
+    ]
+    retriever = ItemKnowledgeRetriever(StubDocumentIndex([stored[2]], stored=stored), access=StubAccess())
+
+    [one] = await retriever.search(["leave"], limit=1, ctx=CONTEXT, context_chunks=1)
+    [two] = await retriever.search(["leave"], limit=1, ctx=CONTEXT, context_chunks=2)
+
+    assert (_texts(one.context_before), one.content, _texts(one.context_after)) == (["Before"], "Match", ["After"])
+    assert one.passage == "Before\nMatch\nAfter"
+    # Chunk 0 is under another heading: context never crosses it.
+    assert (_texts(two.context_before), _texts(two.context_after)) == (["Before"], ["After", "Further"])
+
+
+@pytest.mark.asyncio
+async def test_neighbours_stop_at_another_match_and_are_never_shown_twice() -> None:
+    stored = [_part(0, "zero"), _part(1, "one", score=0.9), _part(2, "two"), _part(3, "three", score=0.8), _part(4, "four")]
+    retriever = ItemKnowledgeRetriever(StubDocumentIndex([stored[1], stored[3]], stored=stored), access=StubAccess())
+
+    first, second = await retriever.search(["leave"], limit=2, ctx=CONTEXT, context_chunks=1)
+
+    assert (_texts(first.context_before), _texts(first.context_after)) == (["zero"], ["two"])
+    # "two" went to the stronger match; "one" is a match of its own.
+    assert (_texts(second.context_before), _texts(second.context_after)) == ([], ["four"])
+
+
+@pytest.mark.asyncio
+async def test_a_match_on_a_sheet_brings_its_whole_row_and_no_other_row() -> None:
+    def row(number: int) -> tuple[Highlight, ...]:
+        return (Highlight(sheet="Survey", range=f"A{number}:DH{number}"),)
+
+    stored = [
+        _part(10, "row 13", location="Survey", highlights=row(13)),
+        _part(11, "row 14 part 1: student 14141007", location="Survey", highlights=row(14)),
+        _part(12, "row 14 part 2", location="Survey", highlights=row(14)),
+        _part(13, "row 14 part 3", location="Survey", highlights=row(14), score=0.9),
+        _part(14, "row 14 part 4", location="Survey", highlights=row(14)),
+        _part(15, "row 15 part 1", location="Survey", highlights=row(15)),
+        _part(16, "row 15 part 2", location="Survey", highlights=row(15)),
+    ]
+    retriever = ItemKnowledgeRetriever(StubDocumentIndex([stored[3]], stored=stored), access=StubAccess())
+
+    [match] = await retriever.search(["survey"], limit=1, ctx=CONTEXT, context_chunks=1)
+
+    # Every other part of its row (whatever context_chunks says), never the rows around it.
+    assert _texts(match.context_before) == ["row 14 part 1: student 14141007", "row 14 part 2"]
+    assert _texts(match.context_after) == ["row 14 part 4"]
+
+
+@pytest.mark.asyncio
+async def test_without_context_or_when_it_cannot_be_read_the_matches_stand_alone() -> None:
+    class Unreadable(StubDocumentIndex):
+        async def get_item_chunks(self, *, tenant_id: str, chunks) -> list[ContextualChunk]:
+            raise RuntimeError("index unavailable")
+
+    match = _part(2, "Match", score=0.9)
+    plain = StubDocumentIndex([match], stored=[_part(1, "Before"), match])
+
+    [alone] = await ItemKnowledgeRetriever(plain, access=StubAccess()).search(["leave"], limit=1, ctx=CONTEXT)
+    [kept] = await ItemKnowledgeRetriever(Unreadable([match]), access=StubAccess()).search(
+        ["leave"], limit=1, ctx=CONTEXT, context_chunks=1
+    )
+
+    assert plain.context_reads == []
+    assert (alone.context_before, alone.context_after) == ((), ())
+    assert (kept.content, kept.context_before, kept.context_after) == ("Match", (), ())
+
+
+def test_a_passage_shows_every_match_first_and_each_part_with_its_own_reference() -> None:
+    def passage(match: str, before: str, after: str, refs: tuple[str, str, str]) -> Evidence:
+        parts = [replace(EVIDENCE, id=ref, chunk_id=ref, content=text) for ref, text in zip(refs, (before, match, after), strict=True)]
+        return replace(parts[1], context_before=(parts[0],), context_after=(parts[2],))
+
+    first = passage("First match.", "B" * 400, "A" * 400, ("ref_3", "ref_1", "ref_4"))
+    second = passage("Second match.", "C" * 400, "D" * 400, ("ref_5", "ref_2", "ref_6"))
+    builder = EvidenceContextBuilder(max_characters=1_800)
+
+    built = builder.build([first, second])
+
+    assert len(built.text) <= 1_800
+    # Both matches are shown before any context; context goes to the strongest match first, nearest
+    # first (after, then before, cut to what is left), and none is left for the second match.
+    assert "[ref_1] [match] First match." in built.text and "Second match." in built.text
+    assert "[ref_4] " + "A" * 400 in built.text
+    assert "[ref_3] …B" in built.text
+    # Only shown parts are returned (match first, then its context in document order): only they are citable.
+    assert [item.id for item in built.evidence] == ["ref_1", "ref_3", "ref_4", "ref_2"]
+    assert "ref_5" not in built.text and "ref_6" not in built.text
+
+
+def test_context_before_a_match_keeps_its_end_and_a_cut_side_stops() -> None:
+    near = replace(EVIDENCE, id="ref_2", chunk_id="near", content="start of the sentence " + "x" * 600 + " leading into the match")
+    far = replace(EVIDENCE, id="ref_3", chunk_id="far", content="far away text " * 20)
+    match = replace(EVIDENCE, id="ref_1", chunk_id="match", content="The match.", context_before=(far, near))
+
+    built = EvidenceContextBuilder(max_characters=1_100).build([match])
+
+    assert "leading into the match\n[ref_1] [match] The match." in built.text
+    assert "[ref_2] …" in built.text
+    # The nearer part was cut, so nothing farther is shown on that side.
+    assert "[ref_3]" not in built.text
+    assert [item.id for item in built.evidence] == ["ref_1", "ref_2"]
+
+
+@pytest.mark.asyncio
+async def test_context_parts_are_citable_and_matches_are_numbered_first() -> None:
+    def cut(chunk_id: str, text: str) -> Evidence:
+        return replace(EVIDENCE, id=chunk_id, chunk_id=chunk_id, content=text)
+
+    first = replace(cut("m1", "First match."), context_after=(cut("a1", "After the first."),))
+    second = replace(cut("m2", "Second match."), context_before=(cut("b2", "Before the second."),))
+    tool = KnowledgeSearch(StubRetriever([first, second]), context_chunks=1)
+
+    result = await tool.handle(invocation({"queries": ["leave"]}))
+
+    assert [item.id for item in result.evidence] == ["ref_1", "ref_3", "ref_2", "ref_4"]
+    assert "[ref_3] After the first." in result.content
+    assert "[ref_4] Before the second.\n[ref_2] [match] Second match." in result.content

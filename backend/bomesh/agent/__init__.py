@@ -247,7 +247,8 @@ class SessionConfiguration:
     max_tool_calls: int = 6
     max_history_messages: int = 24
     max_history_characters: int = 24_000
-    max_tool_result_characters: int = 12_000
+    # Fits a knowledge_search result (BOMESH_RETRIEVAL_CONTEXT_CHARACTERS, default 16,000).
+    max_tool_result_characters: int = 16_000
     # Observations kept in one turn's input before the oldest are evicted;
     # generous so the request prefix stays append-only within a turn.
     max_tool_context_characters: int = 60_000

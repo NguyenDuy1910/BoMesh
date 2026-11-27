@@ -141,7 +141,7 @@ function HomeBody({ data, starting, newMember, steps, onHide }: { data: MemberHo
       ) : (
         <PickedForYou picks={picks} starters={data.starterPrompts ?? []} />
       )}
-      <ExploreByDomain domains={(data.topicDomains ?? []).filter((d) => (d.documentCount ?? 0) > 0)} />
+      <ExploreByDomain domains={(data.featuredConcepts ?? []).filter((d) => (d.documentCount ?? 0) > 0)} />
       {newMember && !loadingCards ? <HomeWelcome /> : null}
     </>
   );

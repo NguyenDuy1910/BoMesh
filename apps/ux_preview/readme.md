@@ -48,10 +48,10 @@ Password `demo` for every account (any persona email, or its local part as usern
 Defined in `JOURNEYS` in `scripts/core/proto.js`. By persona:
 
 - **Northwind member** — sign in and ask; verify an answer's source; request access; contribute a document, track it and revise it after review; pick up and share conversations; join a workspace from an invite link.
-- **Northwind admin** — set up knowledge (collections → topics → sources); process, review and publish submissions; import topics and reclassify; merge a duplicate; manage sources and accounts; manage people, access requests and invite links; turn on Spaces.
+- **Northwind admin** — set up knowledge (collections → classification → sources); process, review and publish submissions; import concepts and publish the scheme; merge a duplicate; manage sources and accounts; manage people, access requests and invite links; turn on Spaces.
 - **Finx engineer, lead, analyst** — start from Home; ask, then file a request; read with AI beside the document; draft from earlier decisions; keep chats in a project; review contributions and manage collection access; compare options; find metric definitions.
-- **Finx admin** — follow documents from upload to searchable; choose which uploads to process; fix failed processing; teach classification from corrections; approve proposed topics; work the review queue; configure the workspace.
-- **UTE** — first week as a new student; find a form on the knowledge map; look after a department's materials; organise faculties, offices and forms; choose which digitised records to process.
+- **Finx admin** — follow documents from upload to searchable; choose which uploads to process; fix failed processing; teach classification from reviewers’ corrections; confirm concepts the classifier suggested; work the review queue; configure the workspace.
+- **UTE** — first week as a new student; find a form on the knowledge map; student: search “khóa luận” and pick what you meant; look after a department's materials; organise faculties, offices and forms; admin: choose which digitised records to process, publish a change to the classification schemes, confirm what the classifier left for review.
 - **Operator** — create a workspace; investigate degraded processing; check indexing health.
 
 ## Product map
@@ -60,7 +60,7 @@ Defined in `JOURNEYS` in `scripts/core/proto.js`. By persona:
 | --- | --- |
 | Every member | Workspace: Home · Knowledge (Browse, Map, My library, document reader) · New chat · Work and Requests when the module is on. Your work: Projects · Spaces (module) · My contributions. Search (⌘K) and the Inbox in the header |
 | Collection owners and editors | Manage › Knowledge Studio for the collections they look after |
-| Workspace admin | Manage: Overview · Knowledge Studio (Documents, Collections, Topics, Sources) · People · Assistant · Activity · Settings |
+| Workspace admin | Manage: Overview · Knowledge Studio (Documents, Collections, Classification, Sources) · People · Assistant · Activity · Settings |
 | Operator | Platform console: Workspaces · Users · Connectors · Indexing · Usage · Audit log · System health |
 
 An area's sections are sidebar sub-rows, never page tabs. The full route list is in `scripts/core/router.js` and [docs/SCREEN_INVENTORY.md](docs/SCREEN_INVENTORY.md).
@@ -75,7 +75,7 @@ An area's sections are sidebar sub-rows, never page tabs. The full route list is
 - [docs/HOME.md](docs/HOME.md) — Home, where everyone starts.
 - [docs/KNOWLEDGE_HUB.md](docs/KNOWLEDGE_HUB.md) — finding, reading and using knowledge.
 - [docs/KNOWLEDGE_MAP.md](docs/KNOWLEDGE_MAP.md) — the Knowledge Atlas (`/knowledge/map`).
-- [docs/KNOWLEDGE_STUDIO.md](docs/KNOWLEDGE_STUDIO.md) — Manage › Knowledge Studio: intake, explicit processing, review, topics, sources.
+- [docs/KNOWLEDGE_STUDIO.md](docs/KNOWLEDGE_STUDIO.md) — Manage › Knowledge Studio: intake, explicit processing, review, classification, sources.
 - [docs/DOCUMENT_LIFECYCLE.md](docs/DOCUMENT_LIFECYCLE.md) — contribute → process → review → publish.
 - [docs/FINX_WORKSPACE.md](docs/FINX_WORKSPACE.md) — the Finx demo workspace.
 
@@ -96,7 +96,7 @@ scripts/data/       mock.js (Northwind + platform), finx.js, campus.js, knowledg
 scripts/i18n/       vi.js (Vietnamese interface strings)
 scripts/features/   one IIFE per product area, e.g. home, chat + conversations, knowledge,
                     reader, preview, library, contribute, curation (Knowledge Studio),
-                    governance, masterdata (topics), documents, sources + connections,
+                    governance, masterdata (classification), documents, sources + connections,
                     shares, people, settings, platform
 ```
 

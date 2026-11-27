@@ -17,9 +17,10 @@
 // Resource IDs: a resource whose Create takes a client-chosen `{resource}Id`
 // keeps its API ID in `code` (immutable, unique within its parent). When the
 // client omits it the server writes `r` + the 32 hex digits of the row uuid,
-// which matches every client ID pattern: groups, roles, topics,
-// integration_connections, ingestion_sources, conversations, spaces and
-// request_types. Every other resource ID is the row uuid (or the referenced
+// which matches every client ID pattern: groups, roles, concept_schemes,
+// concepts (notation), concept_groups, concept_rules, integration_connections,
+// ingestion_sources, conversations, spaces and request_types. Every other
+// resource ID is the row uuid (or the referenced
 // item/member ID where the API says so).
 // etag = updated_at of the row unless a note says otherwise; purgeTime =
 // deleted_at + the retention of that resource (30 days); both are computed.
@@ -312,7 +313,7 @@ Table operations {
   id uuid [pk]
   user_id uuid [not null, note: 'The caller who started it; Get/List/:cancel are own-only']
   tenant_id uuid [note: 'Workspace it acts in; null for platform operations (exportUsage, platform audit export). CreateWorkspace stores the new tenant']
-  verb varchar(64) [not null, note: 'metadata.verb: createWorkspace | exportAuditEvents | exportUsage | createArtifact | reviseArtifact']
+  verb varchar(64) [not null, note: 'metadata.verb: createWorkspace | exportAuditEvents | exportUsage | createArtifact | reviseArtifact | publishConceptScheme']
   target text [not null, note: 'metadata.target resource name, e.g. workspaces/{w} or workspaces/{w}/artifacts/{a}']
   progress_percent smallint [not null, default: 0]
   cancel_requested_at timestamptz [note: 'metadata.cancelRequested; :cancel sets it and signals the workflow']
@@ -448,7 +449,7 @@ Table contributions {
   note text
   change_summary text
   external_version text [note: 'origin source + new_revision: the provider version under review; one open contribution per (replaces_item_id, external_version)']
-  suggestions jsonb [not null, default: `{}`, note: '{collection_id, summary, title, topics_confidence, proposed_topics_confidence, collection_confidence, summary_confidence}. title is the display name CLASSIFYING wrote from the content. File type is deterministic from content and is never an assistant suggestion; the suggested and proposed topics themselves are contribution_topics']
+  suggestions jsonb [not null, default: `{}`, note: '{collection_id, summary, title, collection_confidence, summary_confidence}. title is the display name CLASSIFYING wrote from the content. File type is deterministic from content and is never an assistant suggestion; suggested concepts are item_concepts rows of the candidate']
   flags jsonb [not null, default: `[]`, note: '[{flag: duplicate | new_revision | personal_data | unsearchable_format, related_item_id}]']
   state varchar(24) [not null, default: 'analyzing', note: 'analyzing | in_review | changes_requested | approved | rejected | withdrawn']
   decided_by_user_id uuid
@@ -464,94 +465,330 @@ Table contributions {
     (ingestion_source_id, state)
     item_id [unique, note: 'Partial while state in (analyzing, in_review, changes_requested) and deleted_at is null: one open contribution per candidate']
   }
-  Note: 'Approval moves/publishes the candidate or appends a revision of replaces_item_id in one transaction, and copies the approved topics into item_topics. A NEW_DOCUMENT candidate is processed before approval (its run refreshes suggestions); approval never starts an Ingestion Run. Timeline events are audit_logs rows (resource_type contribution). audienceSummary is computed. Same-tenant references are trigger-checked.'
+  Note: 'Approval moves/publishes the candidate or appends a revision of replaces_item_id in one transaction, and accepts the approved concepts on the candidate (item_concepts). A NEW_DOCUMENT candidate is processed before approval (its run refreshes suggestions); approval never starts an Ingestion Run. Timeline events are audit_logs rows (resource_type contribution). audienceSummary is computed. Same-tenant references are trigger-checked.'
 }
 
-// The workspace taxonomy (DOMAIN and TOPIC). Documents reference topics
-// through item_topics, contributions through contribution_topics.
-Table topics {
+// ───────────────────────────────────────────────────────────────────────────
+// Faceted taxonomy (SKOS; rationale item_model.md "Taxonomy", design in
+// item_model.md §4.13). Schemes are independent axes (domain, function,
+// document type, audience: classification; org unit, program: authority).
+// tenant_id NULL = platform template; a workspace forks it. Every reference
+// is same-tenant (trigger); a template row references only template rows.
+// ───────────────────────────────────────────────────────────────────────────
+
+Table concept_schemes {
   id uuid [pk]
-  tenant_id uuid [not null]
-  code varchar(64) [not null, note: 'API topic ID']
-  kind varchar(16) [not null, note: 'domain | topic']
-  parent_topic_id uuid [note: 'Topic kind only: a domain of the same tenant']
-  topic_name varchar(255) [not null, note: 'Topic.displayName']
+  tenant_id uuid [note: 'NULL = platform template']
+  code varchar(64) [not null, note: 'API ID ^[a-z][a-z0-9-]{0,62}$: domain | function | document-type | audience | org-unit | program …']
+  scheme_name varchar(255) [not null]
   description text
+  purpose varchar(16) [not null, note: 'classification | authority. Only classification Concepts label Documents; authority Concepts are metadata values (issuer, applicability, member affiliation)']
+  position smallint [not null, default: 0, note: 'Tab order; the lowest classification scheme feeds Home']
+  min_labels smallint [not null, default: 0]
+  max_labels smallint [note: 'NULL = unbounded; >= greatest(min_labels, 1)']
+  has_primary boolean [not null, default: false, note: 'Exactly one primary accepted whole-document label when any']
+  max_depth smallint [not null, default: 1, note: 'Checked by the publish validator']
+  assign_top_concepts boolean [not null, default: true, note: 'false: top Concepts are never a target; Documents roll up via concept_closure']
+  section_assignments boolean [not null, default: false, note: 'Labels may target a section']
+  llm_policy varchar(16) [not null, default: 'never', note: 'always | fallback | never']
+  auto_threshold numeric(4,3) [note: 'confidence >= → accepted']
+  review_threshold numeric(4,3) [note: '>= → suggested; below → uncertain pool']
+  template_scheme_id uuid [note: 'Fork source: a template (tenant_id NULL) scheme; trigger']
+  template_version int [note: 'Template version this fork last took']
+  published_version int [note: 'NULL = never published; the concept_scheme_versions row queries read']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  deleted_at timestamptz
+  indexes {
+    (tenant_id, code) [unique, name: 'uq_concept_schemes_tenant_id_code', note: 'NULLS NOT DISTINCT']
+    template_scheme_id
+  }
+  Note: 'CHECK 0 <= review_threshold <= auto_threshold <= 1; authority ⇒ llm_policy never and no thresholds. tenant_id is immutable (trigger).'
+}
+
+Table concepts {
+  id uuid [pk]
+  tenant_id uuid [note: 'The scheme tenant (trigger); NULL in a template']
+  scheme_id uuid [not null]
+  notation varchar(64) [not null, note: 'API ID and skos:notation ^[a-z][a-z0-9-]{0,62}$; immutable (trigger); never reused: unique over every row, deprecated and deleted included']
+  definition text [note: 'skos:definition; required to publish']
+  scope_note text
+  examples text[] [not null, default: `{}`, note: '<= 5']
+  color varchar(7) [note: '#rrggbb; top Concepts only (trigger at concept write and broader insert); narrower Concepts inherit it']
   icon varchar(64)
-  color varchar(32)
-  keywords text[] [not null, default: `{}`, note: 'Classification signals (Topic.keywords, synonyms, guidance, examples, rules), read whole with the topic and by CLASSIFYING\'s candidate load']
-  synonyms text[] [not null, default: `{}`]
-  guidance text
-  example_item_ids uuid[] [not null, default: `{}`, note: 'Topic.examples: <= 5 Document Items of the tenant; re-checked for visibility on read']
-  rule_collection_ids uuid[] [not null, default: `{}`, note: 'Topic.rules {collection}: Collection Items whose subtree settles the topic']
-  rule_source_codes text[] [not null, default: `{}`, note: 'Topic.rules {source}: ingestion_sources.code; matched against the ingestion_sources.code of the Document\'s external_resources row']
-  state varchar(16) [not null, default: 'active', note: 'proposed | active | rejected. DELETED is deleted_at']
-  created_by_user_id uuid [note: 'Null for a topic the assistant proposed']
-  deleted_at timestamptz [note: 'DeleteTopic (only when no item_topics or contribution_topics row uses it) and MergeTopic; :undelete clears']
+  match_patterns text[] [not null, default: `{}`, note: 'RE2 patterns over title, number and first heading; <= 20']
+  time_sensitive boolean [not null, default: false, note: 'Recency ranking']
+  state varchar(16) [not null, default: 'draft', note: 'draft | published | deprecated']
+  first_version int
+  deprecated_version int [note: 'Version that deprecates it. Set by DeprecateConcept on a published Concept (pending: state stays published) and kept when the publish of that version flips state to deprecated; never on a draft']
+  template_concept_id uuid [note: 'Forked from a template Concept (tenant_id NULL; trigger)']
+  created_by_user_id uuid
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  deleted_at timestamptz [note: 'Only a never-published draft; the notation stays reserved']
+  indexes {
+    (scheme_id, notation) [unique]
+    (scheme_id, state)
+    tenant_id
+    template_concept_id
+  }
+}
+
+// dct:isReplacedBy of a deprecated Concept (same scheme, trigger).
+Table concept_replacements {
+  concept_id uuid [not null]
+  replacement_concept_id uuid [not null]
+  indexes {
+    (concept_id, replacement_concept_id) [pk]
+    replacement_concept_id
+  }
+}
+
+Table concept_labels {
+  id uuid [pk]
+  concept_id uuid [not null]
+  kind varchar(8) [not null, note: 'pref | alt | hidden']
+  language_code varchar(16) [not null, note: 'vi | en …']
+  label_text varchar(255) [not null]
+  normalized text [not null, note: 'normalize_label(label_text): NFC, casefold, whitespace collapsed, surrounding punctuation stripped; diacritics kept (khoa ≠ khóa). Written by services']
+  indexes {
+    (concept_id, language_code, normalized) [unique, note: 'I2: pref/alt/hidden disjoint within a concept']
+    (concept_id, language_code) [unique, name: 'uq_concept_labels_pref', note: 'I1: partial WHERE kind = pref']
+    normalized
+  }
+}
+
+Table concept_relations {
+  source_concept_id uuid [not null]
+  target_concept_id uuid [not null]
+  kind varchar(8) [not null, note: 'broader (source narrower than target) | related']
+  indexes {
+    (source_concept_id, target_concept_id, kind) [pk]
+    (target_concept_id, kind)
+  }
+  Note: 'Working graph (drafts included). Same scheme and no broader cycle, poly-hierarchy included (trigger). related stored once with source < target (CHECK).'
+}
+
+Table concept_closure {
+  ancestor_id uuid [not null]
+  descendant_id uuid [not null]
+  depth smallint [not null, note: 'Shortest broader path; 0 = self']
+  indexes {
+    (ancestor_id, descendant_id) [pk]
+    descendant_id
+  }
+  Note: 'Of the PUBLISHED graph only; rebuilt per scheme in the publish transaction (services/taxonomy/closure.py)'
+}
+
+// skos:Collection: display grouping and query expansion, never a target.
+Table concept_groups {
+  id uuid [pk]
+  scheme_id uuid [not null]
+  code varchar(64) [not null]
+  group_name varchar(255) [not null]
+  position smallint [not null, default: 0]
+  query_expansion boolean [not null, default: false, note: 'Members are interchangeable in queries']
   created_at timestamptz [not null]
   updated_at timestamptz [not null]
   indexes {
-    (tenant_id, code) [unique]
-    (tenant_id, state, kind)
-    parent_topic_id
+    (scheme_id, code) [unique]
   }
-  Note: 'A trigger enforces same-tenant parent_topic_id, parent kind = domain, and parent_topic_id null for domains. evidence, documentCount and inReviewCount are computed per caller from contribution_topics and item_topics.'
 }
 
-// Document.topics. One row per (Document, topic) tag.
-Table item_topics {
-  item_id uuid [not null, note: 'A Document Item']
-  topic_id uuid [not null, note: 'An active topic of the item tenant']
-  created_by_user_id uuid [note: 'Null = assistant-applied by an ingestion run\'s CLASSIFYING step, which replaces only null rows; a person\'s tags are never replaced']
-  created_at timestamptz [not null]
+Table concept_group_members {
+  group_id uuid [not null]
+  concept_id uuid [not null, note: 'A Concept of the group scheme (trigger)']
+  position smallint [not null, default: 0]
   indexes {
-    (item_id, topic_id) [pk]
-    (topic_id, item_id)
+    (group_id, concept_id) [pk]
+    concept_id
   }
-  Note: 'A trigger enforces same tenant and item_kind = document. UpdateItem document.topics replaces the set (rows become the caller\'s); ConfirmTopicAssignments sets created_by_user_id on null rows; MergeTopic moves rows to the target topic (deduplicated) in one statement. Filters (document.topics, document.assistantTopics) and facets join this table to the readable hits.'
 }
 
-// One reviewable feedback event: a person changed the assistant's topic set
-// on a Document. It has an independent API identity and dismiss lifecycle;
-// the changed Topics are normalized child relations, never UUID arrays.
-Table topic_corrections {
+Table concept_mappings {
+  concept_id uuid [not null]
+  target_system varchar(32) [not null, note: 'moet-program | isced-f-2013 | …']
+  target_code varchar(64) [not null]
+  target_label text
+  match_type varchar(8) [not null, note: 'exact | close | broad | narrow']
+  indexes {
+    (concept_id, target_system, target_code) [pk]
+  }
+}
+
+Table concept_rules {
   id uuid [pk]
   tenant_id uuid [not null]
-  item_id uuid [not null, note: 'Historical Document reference; the Item is not re-pointed by MergeItem']
-  actor_user_id uuid [not null]
-  dismissed_at timestamptz [note: 'Null = OPEN; set once by :dismiss = DISMISSED']
+  code varchar(64) [not null]
+  when_concept_id uuid [note: 'A Concept of the tenant']
+  when_collection_item_id uuid [note: 'A Collection of the tenant: its subtree']
+  when_ingestion_source_id uuid
+  then_concept_id uuid [not null, note: 'A classification Concept of the tenant']
+  effect varchar(8) [not null, note: 'implies (settles the concept) | prior (adds a weighted candidate)']
+  weight numeric(4,3) [note: 'prior only, 0..1']
+  created_by_user_id uuid
+  created_at timestamptz [not null]
+  deleted_at timestamptz
+  indexes {
+    (tenant_id, code) [unique, name: 'uq_concept_rules_live_code', note: 'Partial WHERE deleted_at IS NULL']
+    when_concept_id
+    when_collection_item_id
+    when_ingestion_source_id
+    then_concept_id
+  }
+  Note: 'CHECK exactly one when_*. References are same-tenant (trigger).'
+}
+
+Table concept_scheme_versions {
+  scheme_id uuid [not null]
+  version int [not null]
+  published_by_user_id uuid [not null]
+  published_at timestamptz [not null]
+  snapshot jsonb [not null, default: `{}`, note: 'snapshot_json (services/taxonomy/snapshot.py, snake_case keys): scheme settings, published and deprecated Concepts with labels, relations, replacements, mappings, groups. Immutable input of classification, query mapping and export']
+  changes jsonb [not null, default: `[]`, note: '[{kind: added|relabeled|redefined|moved|deprecated|thresholds|settings|groups, concept, group, replaced_by[]}]']
+  warnings jsonb [not null, default: `[]`]
+  reclassification jsonb [note: '{remapped, rerank: [{concept, among[]}], rerun_parents: [{parent, among[]}], patterns_changed: [concept], thresholds_changed, state: pending|running|done, runs[], rejected, rerouted, patterns_reevaluated}']
+  indexes {
+    (scheme_id, version) [pk]
+  }
+}
+
+// Suggestions tab: proposed Concepts or labels; never created by the classifier.
+Table concept_proposals {
+  id uuid [pk]
+  tenant_id uuid [not null]
+  scheme_id uuid [not null]
+  kind varchar(16) [not null, note: 'new_concept | label']
+  proposal_name varchar(255) [not null, note: 'Concept name (new_concept) or label text (label)']
+  definition text
+  broader_concept_id uuid [note: 'new_concept only']
+  target_concept_id uuid [note: 'Set exactly for label']
+  origin varchar(16) [not null, note: 'cluster | correction | member']
+  state varchar(16) [not null, default: 'open', note: 'open | accepted | rejected; decided_at set exactly when not open']
+  concept_id uuid [note: 'The draft Concept that accepting created']
+  decided_by_user_id uuid
+  decided_at timestamptz
   created_at timestamptz [not null]
   indexes {
-    (tenant_id, created_at) [note: 'Partial WHERE dismissed_at IS NULL: open corrections newest first']
+    (tenant_id, state, created_at)
+    (scheme_id, state)
+  }
+  Note: 'Scheme of the tenant; referenced Concepts of the scheme (trigger).'
+}
+
+Table concept_proposal_items {
+  proposal_id uuid [not null]
+  item_id uuid [not null, note: 'A Document of the proposal tenant (trigger)']
+  indexes {
+    (proposal_id, item_id) [pk]
     item_id
   }
-  Note: 'Created by ApproveContribution (recordCorrection) and UpdateItem topics only when the chosen set differs from the assistant set. State is derived from dismissed_at. A trigger keeps the Document and actor in tenant_id; itemDisplayName is items.item_name and is omitted when the caller cannot read the Item. A deferred constraint trigger requires at least one topic_correction_changes row.'
 }
 
-Table topic_correction_changes {
-  topic_correction_id uuid [not null]
-  topic_id uuid [not null]
-  change_type varchar(16) [not null, note: 'removed | added']
+// Document.concepts. Machine and human labels, with their review history.
+Table item_concepts {
+  id uuid [pk]
+  item_id uuid [not null, note: 'A Document (also a contribution candidate)']
+  concept_id uuid [not null]
+  scheme_id uuid [not null, note: 'Denormalized; trigger = concept.scheme_id']
+  is_primary boolean [not null, default: false, note: 'Whole-document rows only (CHECK)']
+  revision_number int [note: 'Set exactly with section_ref']
+  section_ref text [note: 'Structured Document node ref; NULL = whole document']
+  confidence real [note: 'NULL for human']
+  source varchar(16) [not null, note: 'rule | lexical | knn | llm | human']
+  state varchar(16) [not null, default: 'suggested', note: 'suggested | accepted | rejected (kept as correction history; reads omit it)']
+  scheme_version int [note: 'Published version the decision used']
+  classifier_version varchar(64)
+  evidence jsonb [not null, default: `{}`, note: '{quote, signals: [{kind, score}], rule, replacedFrom}']
+  reviewed_by_user_id uuid
+  reviewed_at timestamptz
+  created_by_user_id uuid [note: 'source = human']
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
   indexes {
-    (topic_correction_id, topic_id) [pk]
-    (topic_id, change_type, topic_correction_id) [note: 'List corrections by added (toTopics) or removed (fromTopics) Topic']
+    (item_id, concept_id, section_ref) [unique, name: 'uq_item_concepts_live_label', note: 'Partial WHERE state <> rejected, NULLS NOT DISTINCT']
+    (item_id, scheme_id) [unique, name: 'uq_item_concepts_primary', note: 'Partial WHERE is_primary AND state = accepted AND section_ref IS NULL']
+    (concept_id, state, item_id)
+    (scheme_id, state, created_at) [note: 'Suggestions queue']
   }
-  Note: 'A trigger requires the Topic to belong to the correction tenant. API fromTopics = removed rows; toTopics = added rows. Deleting a correction cascades only these owned child rows.'
+  Note: 'I10 (trigger): a Document of the Concept tenant; Concept published and not deleted when inserted or re-pointed; scheme purpose classification; no top Concept (no broader row) when assign_top_concepts is false. I11 (deferred constraint trigger, at commit): accepted whole-document rows per (item, scheme) <= max_labels and exactly one primary when has_primary and any exists.'
 }
 
-// Topics an assistant analysis suggested (existing) or proposed (new
-// PROPOSED topic) for a contribution.
-Table contribution_topics {
-  contribution_id uuid [not null]
-  topic_id uuid [not null]
-  relation varchar(16) [not null, note: 'suggested | proposed. AcceptTopic turns proposed rows into suggested ones']
+// Outcome per (Document, classification scheme): tells "nothing fits" from "unsure".
+Table item_classifications {
+  item_id uuid [not null]
+  scheme_id uuid [not null, note: 'A classification scheme of the Document tenant (trigger)']
+  outcome varchar(16) [not null, note: 'assigned | empty | uncertain | failed']
+  confidence real
+  scheme_version int
+  classifier_version varchar(64)
+  revision_number int
+  classified_at timestamptz [not null]
+  indexes {
+    (item_id, scheme_id) [pk]
+    (scheme_id, outcome)
+  }
+}
+
+// 1:1 typed metadata of a Document, off items like item_index_states.
+Table document_profiles {
+  item_id uuid [pk, note: 'A Document (trigger)']
+  issuer_concept_id uuid [note: 'An authority Concept of the Document tenant (trigger)']
+  campus_concept_id uuid [note: 'An authority Concept of the Document tenant (trigger)']
+  document_number varchar(128) [note: 'As printed: 123/QĐ-ĐHCNKT-ĐT']
+  issued_on date
+  effective_on date
+  applicability_level varchar(16) [note: 'institution | unit | program | cohort; NULL = unknown, treated as institution']
+  applicability_cohorts smallint[] [not null, default: `{}`, note: 'Entry years']
+  applicability_confidence real
+  field_sources jsonb [not null, default: `{}`, note: '{field: extracted|human}; extraction never overwrites human fields']
+  unresolved_supersedes text[] [not null, default: `{}`, note: 'Superseded document numbers not yet matched to an Item']
+  revision_number int
+  updated_at timestamptz [not null]
+  indexes {
+    issuer_concept_id
+    issued_on
+  }
+}
+
+Table document_applicability {
+  item_id uuid [not null]
+  concept_id uuid [not null, note: 'An authority (org-unit or program) Concept of the Document tenant (trigger)']
+  indexes {
+    (item_id, concept_id) [pk]
+    concept_id
+  }
+}
+
+Table document_supersessions {
+  item_id uuid [not null]
+  superseded_item_id uuid [not null, note: 'A Document of the same tenant (trigger); <> item_id']
+  source varchar(16) [not null, default: 'extracted', note: 'extracted | human']
   created_at timestamptz [not null]
   indexes {
-    (contribution_id, topic_id) [pk]
-    (topic_id, relation)
+    (item_id, superseded_item_id) [pk]
+    superseded_item_id
   }
-  Note: 'A trigger enforces same tenant. Topic.evidence = contributions with a proposed row the caller may see.'
 }
+
+// Member.affiliation; never self-declared.
+Table member_affiliations {
+  tenant_id uuid [not null]
+  user_id uuid [not null]
+  concept_id uuid [not null, note: 'An authority (org-unit or program) Concept of the tenant (trigger)']
+  cohort smallint [note: 'Entry year, e.g. 2022']
+  source varchar(16) [not null, default: 'directory', note: 'directory (registrar import) | admin']
+  updated_by_user_id uuid
+  updated_at timestamptz [not null]
+  indexes {
+    (tenant_id, user_id, concept_id) [pk]
+    concept_id
+  }
+}
+
+// View cross_scheme_labels (W2; created with the schema, models/triggers.py):
+// per tenant, the normalized labels of published Concepts that occur in more
+// than one scheme — tenant_id, normalized, scheme_ids[], concept_ids[].
 
 // Shortcut of an existing Document inside another Collection (one
 // canonical Item, no copied object or embedding). Not hierarchy, never a grant.
@@ -771,10 +1008,10 @@ Table external_resources {
 Table ingestion_runs {
   id uuid [pk]
   tenant_id uuid [not null]
-  trigger_type varchar(16) [not null, note: 'manual | api | schedule | platform_retry']
+  trigger_type varchar(16) [not null, note: 'manual | api | schedule | platform_retry | taxonomy (reclassification after a scheme publish)']
   scope jsonb [not null, default: `{}`, note: 'IngestionRun.selector as asked: {item_ids (<= 1000), filter (AIP-160 text), filter_item_ids (items the filter names; the filter is echoed only to readers of all of them)}. Scheduled runs: a filter on their source and PENDING or OUTDATED']
   status varchar(16) [not null, default: 'queued', note: 'queued | running | succeeded | failed | cancelled. succeeded allows failed tasks; failed means the run itself stopped']
-  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism, classification {topics (topic codes), note}, read_images (IngestionRun.readImages)']
+  configuration jsonb [not null, default: `{}`, note: 'Fixed at creation: processing_version, models, batch_max_items, batch_max_bytes, parallelism, classification {concepts (ids), note, rerank {scheme_code: [concept ids]}, schemes (codes; empty = all)}, classify_only, read_images (IngestionRun.readImages)']
   item_count int [not null, default: 0]
   retry_of_run_id uuid [note: 'IngestionRun.retryOf; a run of the same tenant']
   error jsonb [note: 'user-safe google.rpc.Status when the run as a whole stopped']
@@ -1284,19 +1521,57 @@ Ref: contributions.replaces_item_id > items.id
 Ref: contributions.contributor_user_id > users.id
 Ref: contributions.ingestion_source_id > ingestion_sources.id
 Ref: contributions.decided_by_user_id > users.id
-Ref: topics.tenant_id > tenants.id
-Ref: topics.parent_topic_id > topics.id
-Ref: topics.created_by_user_id > users.id
-Ref: item_topics.item_id > items.id
-Ref: item_topics.topic_id > topics.id
-Ref: item_topics.created_by_user_id > users.id
-Ref: topic_corrections.tenant_id > tenants.id
-Ref: topic_corrections.item_id > items.id
-Ref: topic_corrections.actor_user_id > users.id
-Ref: topic_correction_changes.topic_correction_id > topic_corrections.id
-Ref: topic_correction_changes.topic_id > topics.id
-Ref: contribution_topics.contribution_id > contributions.id
-Ref: contribution_topics.topic_id > topics.id
+Ref: concept_schemes.tenant_id > tenants.id
+Ref: concept_schemes.template_scheme_id > concept_schemes.id
+Ref: concepts.tenant_id > tenants.id
+Ref: concepts.scheme_id > concept_schemes.id
+Ref: concepts.template_concept_id > concepts.id
+Ref: concepts.created_by_user_id > users.id
+Ref: concept_replacements.concept_id > concepts.id [delete: cascade]
+Ref: concept_replacements.replacement_concept_id > concepts.id [delete: cascade]
+Ref: concept_labels.concept_id > concepts.id [delete: cascade]
+Ref: concept_relations.source_concept_id > concepts.id [delete: cascade]
+Ref: concept_relations.target_concept_id > concepts.id [delete: cascade]
+Ref: concept_closure.ancestor_id > concepts.id [delete: cascade]
+Ref: concept_closure.descendant_id > concepts.id [delete: cascade]
+Ref: concept_groups.scheme_id > concept_schemes.id [delete: cascade]
+Ref: concept_group_members.group_id > concept_groups.id [delete: cascade]
+Ref: concept_group_members.concept_id > concepts.id [delete: cascade]
+Ref: concept_mappings.concept_id > concepts.id [delete: cascade]
+Ref: concept_rules.tenant_id > tenants.id
+Ref: concept_rules.when_concept_id > concepts.id
+Ref: concept_rules.when_collection_item_id > items.id
+Ref: concept_rules.when_ingestion_source_id > ingestion_sources.id
+Ref: concept_rules.then_concept_id > concepts.id
+Ref: concept_rules.created_by_user_id > users.id
+Ref: concept_scheme_versions.scheme_id > concept_schemes.id
+Ref: concept_scheme_versions.published_by_user_id > users.id
+Ref: concept_proposals.tenant_id > tenants.id
+Ref: concept_proposals.scheme_id > concept_schemes.id
+Ref: concept_proposals.broader_concept_id > concepts.id
+Ref: concept_proposals.target_concept_id > concepts.id
+Ref: concept_proposals.concept_id > concepts.id
+Ref: concept_proposals.decided_by_user_id > users.id
+Ref: concept_proposal_items.proposal_id > concept_proposals.id [delete: cascade]
+Ref: concept_proposal_items.item_id > items.id
+Ref: item_concepts.item_id > items.id
+Ref: item_concepts.concept_id > concepts.id
+Ref: item_concepts.scheme_id > concept_schemes.id
+Ref: item_concepts.reviewed_by_user_id > users.id
+Ref: item_concepts.created_by_user_id > users.id
+Ref: item_classifications.item_id > items.id
+Ref: item_classifications.scheme_id > concept_schemes.id
+Ref: document_profiles.item_id - items.id
+Ref: document_profiles.issuer_concept_id > concepts.id
+Ref: document_profiles.campus_concept_id > concepts.id
+Ref: document_applicability.item_id > items.id
+Ref: document_applicability.concept_id > concepts.id
+Ref: document_supersessions.item_id > items.id
+Ref: document_supersessions.superseded_item_id > items.id
+Ref: member_affiliations.tenant_id > tenants.id
+Ref: member_affiliations.user_id > users.id
+Ref: member_affiliations.concept_id > concepts.id
+Ref: member_affiliations.updated_by_user_id > users.id
 Ref: item_shortcuts.tenant_id > tenants.id
 Ref: item_shortcuts.collection_item_id > items.id
 Ref: item_shortcuts.target_item_id > items.id

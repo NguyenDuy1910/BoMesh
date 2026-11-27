@@ -231,7 +231,7 @@
   --highlight-foreground: var(--foreground);
   /* Category tones: identity colors for things that are kinds, not states (permission groups, roles, avatars).
      Six fixed hues, readable in both themes; used only as soft tiles and marks, never as a fill for text blocks.
-     Status keeps its own colors (success/warning/danger), so a tone never reads as "good" or "bad". Topic domains,
+     Status keeps its own colors (success/warning/danger), so a tone never reads as "good" or "bad". Top concepts,
      too many for six, use a hashed hue instead (lib/tones.ts categoryColor). */
   --tone-blue: oklch(62% 0.17 255);
   --tone-violet: oklch(60% 0.19 295);

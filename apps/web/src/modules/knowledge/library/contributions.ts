@@ -198,7 +198,7 @@ const STEP: Readonly<Record<EventKind, readonly [LucideIcon, StepTone]>> = {
 export type TimelineContext = ContributionContext & {
   mine: boolean;
   revisedName?: string;
-  /** The contributor confirmed type, topics and collection before submitting (written on the candidate item). */
+  /** The contributor confirmed concepts and collection before submitting (written on the candidate item). */
   confirmed?: boolean;
 };
 
@@ -208,7 +208,7 @@ function tail(c: Contribution, ctx: TimelineContext): TimelineStep | null {
   const kb = ctx.base || "kho tài liệu";
   switch (key) {
     case "analyzing":
-      return { icon: Sparkles, tone: "accent", title: "Trợ lý đang đọc tệp", desc: "Trợ lý đề xuất loại, chủ đề và kho tài liệu cho người duyệt.", live: true };
+      return { icon: Sparkles, tone: "accent", title: "Trợ lý đang đọc tệp", desc: "Trợ lý đề xuất khái niệm và kho tài liệu cho người duyệt.", live: true };
     case "review":
       return { icon: Clock, tone: "", title: "Đang chờ người duyệt", desc: `Người duyệt của ${kb} sẽ kiểm tra trước khi công bố.`, next: true };
     case "changes":
@@ -285,12 +285,12 @@ export function progressSteps(c: Contribution, ctx: TimelineContext): ProgressSt
   };
   const analyzed: Omit<ProgressStep, "label"> =
     k === "analyzing"
-      ? { state: "current", busy: true, text: "Đang đọc tệp và đối chiếu với các chủ đề…" }
+      ? { state: "current", busy: true, text: "Đang đọc tệp và đối chiếu với bộ phân loại…" }
       : {
           state: "done",
           text: ctx.confirmed
-            ? `Loại, chủ đề và kho tài liệu đã được ${ctx.mine ? "bạn" : who(c.contributor ?? "", ctx)} xác nhận`
-            : "Đã đề xuất loại, chủ đề và kho tài liệu",
+            ? `Khái niệm và kho tài liệu đã được ${ctx.mine ? "bạn" : who(c.contributor ?? "", ctx)} xác nhận`
+            : "Đã đề xuất khái niệm và kho tài liệu",
         };
   const review: Omit<ProgressStep, "label"> =
     k === "analyzing"

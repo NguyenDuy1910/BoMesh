@@ -1,6 +1,6 @@
 /**
  * The auth brand panel (preview `aside()` in features/auth.js): an illustration of layered documents (a page with a
- * marked passage under a focus ring, a page behind it, a small chart in front) joined to a network of people, topics
+ * marked passage under a focus ring, a page behind it, a small chart in front) joined to a network of people, concepts
  * and collections. Decorative; colours and motion live in pages/auth.css (`.au-art*`), hidden under 1024 px.
  */
 export function AuthAside() {

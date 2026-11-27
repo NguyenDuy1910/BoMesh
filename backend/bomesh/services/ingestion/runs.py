@@ -10,7 +10,8 @@ silently narrows to the collections where the caller holds
 workspace (or, for platform callers, platform) scope — and every item it
 names must be readable. The API boundary compiles the filter (the ListItems
 grammar); the selection is resolved once into the run's tasks (the engine's
-snapshot). ``classification`` names ACTIVE topics only; ``read_images``
+snapshot). ``classification.concepts`` names PUBLISHED concepts of the workspace's
+classification schemes; ``classify_only`` re-runs CLASSIFYING alone; ``read_images``
 needs the configured vision model (else VISION_MODEL_UNAVAILABLE).
 
 Members read runs through the Item visibility rule: ``counts`` and
@@ -32,7 +33,14 @@ from sqlalchemy import ColumnElement, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import SessionFactory, transaction_scope
-from bomesh.db.models import IngestionRun, IngestionRunItem, Item, Tenant, Topic
+from bomesh.db.models import (
+    Concept,
+    ConceptScheme,
+    IngestionRun,
+    IngestionRunItem,
+    Item,
+    Tenant,
+)
 from bomesh.errors import FailedPrecondition, InvalidArgument, NotFound
 from bomesh.iam.authorizer import ItemRef, PlatformRef, WorkspaceRef, permission_denied
 from bomesh.iam.visibility import ItemVisibility
@@ -44,6 +52,7 @@ from bomesh.services.ingestion.run_engine import (
     IngestionRunService,
     RunClassification,
     RunSelection,
+    classifies_only,
     governing_collections,
     live_collections,
     reads_images,
@@ -61,19 +70,20 @@ from bomesh.services.knowledge_curation.access import (
     is_reviewer,
     open_new_document_contributions,
 )
-from bomesh.services.knowledge_curation.records import topic_name
 from bomesh.services.knowledge_items.item_store import catalog_visibility
 from bomesh.services.knowledge_items.support import load_referenced
+from bomesh.services.taxonomy.names import concept_name, parse_concept
 
 if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
 
 CREATE = "ingestionRuns.create"
 MAX_SELECTED_ITEMS = 1000
-MAX_CLASSIFICATION_TOPICS = 50
+MAX_CLASSIFICATION_CONCEPTS = 50
 MAX_CLASSIFICATION_NOTE = 1000
 PAUSED_MESSAGE = "Ingestion is paused for this workspace."
-#: Triggers a caller may ask for; ``SCHEDULE`` is set only by a Source's schedule.
+#: Triggers a caller may ask for; ``SCHEDULE`` is set only by a Source's schedule and
+#: ``TAXONOMY`` only by the system (reclassification after a taxonomy publish).
 _REQUESTED_TRIGGERS = {"MANUAL": "manual", "API": "api", "PLATFORM_RETRY": "platform_retry"}
 #: Window of the throughput, failure rate and error classes without a ``createTime`` bound.
 SUMMARY_WINDOW = timedelta(hours=1)
@@ -107,8 +117,12 @@ class IngestionRunRecord:
     counts: RunCounts
     selector: RunSelection | None
     classification: RunClassification | None
+    #: Resource names of ``classification.concepts`` (same order); empty when metadata-only.
+    concept_names: tuple[str, ...]
     #: ``IngestionRun.readImages``.
     read_images: bool
+    #: ``IngestionRun.classifyOnly``.
+    classify_only: bool
     error: Mapping[str, Any] | None
     retry_of: UUID | None
     create_time: datetime
@@ -168,13 +182,15 @@ class IngestionRuns:
         *,
         classification: RunClassification | None = None,
         read_images: bool = False,
+        classify_only: bool = False,
         trigger: str = "MANUAL",
         request_id: UUID | None = None,
         validate_only: bool = False,
     ) -> IngestionRunRecord:
         """CreateIngestionRun: snapshot the selection and start processing it.
 
-        Nothing selected is an empty run that succeeds at once.
+        ``classification.concepts`` are concept resource names here; the run stores
+        their ids. Nothing selected is an empty run that succeeds at once.
         """
         named = selector is not None and bool(selector.items)
         collections = await self._processable_collections(
@@ -197,6 +213,7 @@ class IngestionRuns:
             "classification": classification.configuration() if classification else None,
             "trigger": trigger,
             "readImages": read_images,
+            "classifyOnly": classify_only,
         }
         async with transaction_scope(self._sessions) as session:
             idempotency = Idempotency(session, self._secret)
@@ -224,6 +241,7 @@ class IngestionRuns:
                 created_by_user_id=ctx.user_id,
                 classification=classification,
                 read_images=read_images,
+                classify_only=classify_only,
             )
             if savepoint is not None:
                 (record,) = await _records(session, [run], visibility)
@@ -304,6 +322,7 @@ class IngestionRuns:
                 retry_of_run_id=run_id,
                 classification=RunClassification.from_configuration(retried.configuration),
                 read_images=reads_images(retried.configuration),
+                classify_only=classifies_only(retried.configuration),
             )
             name = run_name(workspace_id, run.id)
             await Audit(session).record(
@@ -602,40 +621,52 @@ class IngestionRuns:
     async def _classification(
         self, workspace_id: UUID, classification: RunClassification | None
     ) -> RunClassification | None:
-        """Bounded, deduplicated and naming only ACTIVE topics; ``None`` when it says nothing."""
+        """Bounded, deduplicated, concept names resolved to PUBLISHED concept ids of the
+        workspace's classification schemes; ``None`` when it says nothing."""
         if classification is None:
             return None
-        topics = tuple(dict.fromkeys(classification.topics))
+        names = tuple(dict.fromkeys(classification.concepts))
         note = (classification.note or "").strip() or None
-        if len(topics) > MAX_CLASSIFICATION_TOPICS:
+        if len(names) > MAX_CLASSIFICATION_CONCEPTS:
             raise InvalidArgument.for_field(
-                "classification.topics",
-                f"At most {MAX_CLASSIFICATION_TOPICS} topics can be candidates.",
+                "classification.concepts",
+                f"At most {MAX_CLASSIFICATION_CONCEPTS} concepts can be candidates.",
             )
         if note is not None and len(note) > MAX_CLASSIFICATION_NOTE:
             raise InvalidArgument.for_field(
                 "classification.note",
                 f"The note must be at most {MAX_CLASSIFICATION_NOTE} characters.",
             )
-        if topics:
+        parsed = [
+            parse_concept(name, workspace_id, field="classification.concepts") for name in names
+        ]
+        ids: list[str] = []
+        if parsed:
             async with transaction_scope(self._sessions) as session:
-                active = set(
-                    await session.scalars(
-                        select(Topic.code).where(
-                            Topic.tenant_id == workspace_id,
-                            Topic.code.in_(topics),
-                            Topic.state == "active",
-                            Topic.deleted_at.is_(None),
+                rows = (
+                    await session.execute(
+                        select(ConceptScheme.code, Concept.notation, Concept.id)
+                        .join(Concept, Concept.scheme_id == ConceptScheme.id)
+                        .where(
+                            ConceptScheme.tenant_id == workspace_id,
+                            ConceptScheme.purpose == "classification",
+                            ConceptScheme.deleted_at.is_(None),
+                            ConceptScheme.code.in_({code for code, _ in parsed}),
+                            Concept.state == "published",
+                            Concept.deleted_at.is_(None),
                         )
                     )
-                )
-            missing = next((topic for topic in topics if topic not in active), None)
-            if missing is not None:
-                raise InvalidArgument.for_field(
-                    "classification.topics",
-                    f"'{topic_name(workspace_id, missing)}' is not an ACTIVE topic.",
-                )
-        return RunClassification(topics=topics, note=note) if topics or note else None
+                ).all()
+            published = {(code, notation): concept_id for code, notation, concept_id in rows}
+            for name, key in zip(names, parsed, strict=True):
+                concept_id = published.get(key)
+                if concept_id is None:
+                    raise InvalidArgument.for_field(
+                        "classification.concepts",
+                        f"'{name}' is not a PUBLISHED concept of a classification scheme.",
+                    )
+                ids.append(str(concept_id))
+        return RunClassification(concepts=tuple(ids), note=note) if ids or note else None
 
     async def _visibility(
         self, ctx: RequestContext, workspace_id: UUID
@@ -659,6 +690,10 @@ def _requested_trigger(trigger: str, *, platform: bool) -> str:
     if trigger == "PLATFORM_RETRY" and not platform:
         raise InvalidArgument.for_field(
             "trigger", "PLATFORM_RETRY is reserved for the platform console."
+        )
+    if trigger == "TAXONOMY":
+        raise InvalidArgument.for_field(
+            "trigger", "TAXONOMY is set only by the system for reclassification runs."
         )
     if trigger not in _REQUESTED_TRIGGERS:
         raise InvalidArgument.for_field(
@@ -723,18 +758,53 @@ async def _records(
                 select(Item.id).where(Item.id.in_(selected), visibility.clause(Item))
             )
         )
+    classifications = {
+        run.id: RunClassification.from_configuration(run.configuration or {})
+        for run in runs
+        if visibility is not None
+    }
+    names = await _concept_names(
+        session,
+        {
+            UUID(concept)
+            for classification in classifications.values()
+            if classification is not None
+            for concept in classification.concepts
+        },
+    )
     return [
         _record(
             run,
             counts.get(run.id, {}),
             _selector(scopes[run.id], visible) if visibility is not None else None,
+            classifications.get(run.id),
+            names,
         )
         for run in runs
     ]
 
 
+async def _concept_names(session: AsyncSession, concept_ids: set[UUID]) -> dict[str, str]:
+    """Concept id (string) -> resource name."""
+    if not concept_ids:
+        return {}
+    rows = await session.execute(
+        select(Concept.id, Concept.tenant_id, ConceptScheme.code, Concept.notation)
+        .join(ConceptScheme, ConceptScheme.id == Concept.scheme_id)
+        .where(Concept.id.in_(concept_ids))
+    )
+    return {
+        str(concept_id): concept_name(tenant_id, code, notation)
+        for concept_id, tenant_id, code, notation in rows.all()
+    }
+
+
 def _record(
-    run: IngestionRun, counts: Mapping[str, int], selector: RunSelection | None
+    run: IngestionRun,
+    counts: Mapping[str, int],
+    selector: RunSelection | None,
+    classification: RunClassification | None,
+    names: Mapping[str, str],
 ) -> IngestionRunRecord:
     return IngestionRunRecord(
         workspace_id=run.tenant_id,
@@ -749,12 +819,14 @@ def _record(
             cancelled=counts.get("cancelled", 0),
         ),
         selector=selector,
-        classification=(
-            RunClassification.from_configuration(run.configuration or {})
-            if selector is not None
-            else None
+        classification=classification if selector is not None else None,
+        concept_names=(
+            tuple(names[concept] for concept in classification.concepts if concept in names)
+            if selector is not None and classification is not None
+            else ()
         ),
         read_images=reads_images(run.configuration or {}),
+        classify_only=classifies_only(run.configuration or {}),
         error=run.error if selector is not None else None,
         retry_of=run.retry_of_run_id,
         create_time=run.created_at,

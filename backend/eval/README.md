@@ -1,56 +1,69 @@
-# BoMesh RAG benchmark
+# BoMesh benchmark
 
 Design and metric definitions: [`backend/docs_design/evaluation.md`](../docs_design/evaluation.md).
 
-Requires PostgreSQL and Qdrant running with an indexed workspace, plus
-`OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and `EMBEDDING_MODEL` in the root
-`.env`. `BOMESH_RERANKER_MODEL` is optional; without it the reranker uses
-`OPENROUTER_MODEL`. Run from `backend/`:
+One flow over one **suite**: a folder of documents and questions about them.
+`bench` uploads the folder through the API, processes it in one ingestion run,
+measures it (time per phase, outputs, citation highlights), then scores the
+questions (retrieval, permission leaks, optionally the agent). One report per run.
+
+Requires the API (`--api-only` is enough), the ingestion worker (`make worker`),
+PostgreSQL, Qdrant and the models in the root `.env`. Run from `backend/`:
 
 ```bash
-# 0. Optional: ingest a folder into a new Collection and measure processing
-#    (written to eval/runs/ingest/<folder>/<timestamp>/; prints the tenant
-#    and Collection for step 2)
-uv run python -m eval ingest --folder <path> --limit 20 \
-  --workspace hcmute --email <editor email>
+# Ingest the suite into a fresh Collection (its previous one is deleted), measure it, score it
+BOMESH_EVAL_PASSWORD=… uv run python -m eval bench --suite ute-mixed
 
-# 0b. Optional: how well an indexed Collection's citation highlights mark their
-#     text in the Original preview (written to eval/runs/highlights/<collection>/)
-uv run python -m eval highlights --collection <collection-id>
+# Score the last ingestion again without re-ingesting (retrieval settings, after a reindex)
+uv run python -m eval bench --suite ute-mixed --reuse --variants fused,rerank --stages retrieval,leak,agent
 
-# 1. Find a tenant and Collection with indexed Documents
-uv run python -m eval collections
-
-# 2. Draw a dataset from it (written to eval/datasets/<name>/)
-uv run python -m eval generate --name ute-knowledge \
-  --tenant <workspace-id> \
-  --collection <collection-id> \
-  --questions 60 --multi-hop 10 --unanswerable 10
-
-# 3. Benchmark variants side by side (written to eval/runs/<dataset>/<timestamp>/)
-uv run python -m eval run --dataset ute-knowledge --reader <reader email> \
-  --variants fused,rerank --stages retrieval,leak,agent
+# Draw new questions from the last ingestion (replaces questions.jsonl with --force)
+uv run python -m eval generate --suite ute-mixed --questions 60 --multi-hop 10 --unanswerable 10
 ```
 
-`<workspace-id>` is the seeded workspace's ID, printed by `make seed` (IDs are
-generated, so they change with every `make reset-all`). `--collection` may be repeated.
-`--reader` is the user the final stage and the agent read as (the retriever
-checks what that user may read).
+Reports go to `eval/runs/<suite>/<timestamp>/` (`summary.md`, `summary.json`,
+`documents.jsonl`, `results.jsonl`). Both `runs/` and `suites/` are git-ignored.
 
-Useful `run` flags:
+## Suite layout
 
-- `--no-judge`: traditional metrics only (no LLM cost beyond embeddings and
-  the reranker).
-- `--limit N`: only the first N questions.
-- `--candidates N`, `--top-k K`: override the retrieval settings for every
-  variant.
+```text
+eval/suites/<name>/
+  files/            the documents, uploaded in name order
+  questions.jsonl   {id, question, type, language, gold: [{file, quote}], reference_answer}
+  suite.json        {"workspace": "<code>", "user": "<email>"} plus what bench and generate record
+```
 
-`--trace` (sends Langfuse traces) is a global flag and goes before the
-subcommand: `uv run python -m eval --trace run ...`.
+To start a suite, create `suite.json` with `workspace` and `user`, put the files
+in `files/`, run `bench`, then `generate`. Prefer adding files to the existing
+suite over starting another: one suite should cover every format.
 
-`run` exits non-zero when any permission leak probe finds a result.
+## `bench` flags
 
-Review and edit `eval/datasets/<name>/questions.jsonl` before trusting a
-dataset. Each line is `{id, question, type, language, gold: [{item_id, title,
-quote}], reference_answer}`. Model answers are cached in `eval/cache/`
-(git-ignored). Delete that directory to re-ask.
+- `--reuse`: skip ingestion; refused when the files changed since the last one.
+- `--variants configured,fused,rerank,matches`: retrieval settings compared side by side (default `configured`, the `.env`; `matches` gives the agent its matches without surrounding chunks).
+- `--stages retrieval,leak,agent`: default `retrieval,leak`.
+- `--no-judge`: traditional metrics only (no LLM cost beyond embeddings and the reranker).
+- `--candidates N`, `--top-k K`: override the retrieval settings for every variant.
+- `--read-images`: describe pictures during ingestion (vision model).
+
+`--trace` (Langfuse) is a global flag and goes before the command:
+`uv run python -m eval --trace bench …`. `bench` exits non-zero when any
+permission leak probe finds a result. Model answers are cached in `eval/cache/`
+(git-ignored); delete it to re-ask.
+
+## Classification
+
+Scores the facet classifier on a labeled set and recommends per-scheme thresholds
+(`auto`: precision ≥ 0.95, `review`: recall ≥ 0.9). Needs PostgreSQL (the
+workspace's published taxonomy), Qdrant (kNN) and the `.env` models; not run in CI.
+
+```bash
+uv run python -m eval classify --suite example --workspace hcmute
+uv run python -m eval classify --suite hcmute --workspace hcmute --concurrency 8
+```
+
+Suites are `eval/classification/<name>/labels.jsonl`, one sample per line:
+`{id, title, text | path, collection?, labels: {scheme: [notation…]}, primary: {scheme: notation},
+empty: [scheme…], metadata: {number, issue_date, effective_date, issuer, level, units, programs, cohorts}}`.
+`--limit N` classifies the first N samples. Reports go to
+`eval/runs/classification/<suite>/<timestamp>/`.

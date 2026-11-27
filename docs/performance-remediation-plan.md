@@ -315,7 +315,7 @@ the system it measures will produce a confident, wrong answer.
 ## API load test (2026-11)
 
 Harness: `tests/perf/` — `seed.py` (one workspace: 5,000 documents, 200 collections,
-151 members, 64 topics, 20 ingestion runs with 5,375 tasks, …), `load_api.py`
+151 members, a published `domain` concept scheme with 312 concepts and labelled documents, 20 ingestion runs with 5,375 tasks, …), `load_api.py`
 (`setup --recreate` · `run` · `teardown`, isolated database `bomesh_perf`; every
 `openapi.yaml` operation except the model-backed ones: statement count in-process,
 5 sequential calls per case against uvicorn, 20 virtual users for 60 s) and
@@ -343,7 +343,7 @@ Fixes:
 - **Visibility** (`iam/visibility.py`): the visible set is one `MATERIALIZED`, `DISTINCT`
   CTE per statement, tested with a hashed `IN … IS TRUE`; only the document-child walk
   recurses. The recursive estimate went from ~8 M rows to the real ~5 k, so JIT and
-  per-row rescans no longer occur. ListTopics counts are one grouped count.
+  per-row rescans no longer occur.
 - **Pool and authorizer**: JIT off on the app engines; `BOMESH_DB_POOL_SIZE` /
   `BOMESH_DB_MAX_OVERFLOW` (default 20 + 20); a request's authorization lookups share one
   autocommit connection (`Authorizer.keep_connection`); the workspace row is read once
@@ -351,8 +351,9 @@ Fixes:
 - **Set-based authorization**: `Authorizer.holders_permissions` / `active_members`
   (notification fan-out, PublishArtifact audience via `visible_to`), SQL read rules for
   notification subjects (`readable_requests`, `readable_contributions`).
-- **Batching**: ListArtifacts, ListReadingLists, Home (`home_reading_lists`), ImportTopics
-  (in-memory plan, multi-row inserts, no locks for `validateOnly`).
+- **Batching**: ListArtifacts, ListReadingLists, Home (`home_reading_lists`). (The
+  ListTopics/ImportTopics rows above were measured on the legacy topic taxonomy, since
+  replaced by concept schemes.)
 
 Remaining:
 

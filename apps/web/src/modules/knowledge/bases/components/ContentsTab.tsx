@@ -27,8 +27,9 @@ import { listItems, quote } from "../../api";
 import { openMoveFolder, openMoveItems } from "../../components/dialogs";
 import { LifecycleChip } from "../../components/LifecycleChip";
 import { useWhoCanSeeAt } from "../../components/ResourceDetails";
-import { fold } from "../../model";
+import { conceptOrder, fold } from "../../model";
 import { knowledgeKeys, useKnowledgeModel, useMemberNames } from "../../queries";
+import { conceptLabel } from "../../taxonomy";
 import { LEVELS, levelOf } from "../../map/layout";
 import { useFolderOperations } from "../operations";
 import { collectionHref, folderPath, folderSubtree, hasOwnAccess, isOwner, sharesOf, whereLabel, type FolderIndex, type Item } from "../model";
@@ -185,7 +186,7 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
   const levels = LEVELS[workspace.template === "CAMPUS" ? "CAMPUS" : "ENTERPRISE"];
   const router = useRouter();
   const ops = useFolderOperations();
-  const { ctx } = useKnowledgeModel();
+  const { ctx, taxonomy } = useKnowledgeModel();
   const root = collection.name ?? "";
   const here = folder?.name ?? root;
   const [q, setQ] = useState("");
@@ -271,7 +272,12 @@ function ContentsMain({ collection, index, folder, onOpen }: { collection: Item;
             </div>
           );
         }
-        const sub = needle ? where(r.item.parentItem) : (r.item.document?.topics ?? []).slice(0, 2).map((t) => ctx.topicNames?.get(t) ?? "").filter(Boolean).join(" · ");
+        const sub = needle
+          ? where(r.item.parentItem)
+          : conceptOrder(taxonomy, r.item.document?.concepts ?? [])
+              .slice(0, 2)
+              .map((c) => conceptLabel(taxonomy, c))
+              .join(" · ");
         return (
           <div className="row gap-12">
             <FileIcon name={r.item.document?.fileName || r.item.displayName} mime={r.item.document?.mimeType} />

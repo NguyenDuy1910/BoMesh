@@ -13,6 +13,8 @@ from bomesh.knowledge import (
     Evidence,
     EvidenceContextBuilder,
     KnowledgeRetriever,
+    QueryInterpretation,
+    Retrieval,
     RetrievalContext,
 )
 from bomesh.observability import NoopTracer, Tracer, TraceSerializer, TraceSpan
@@ -24,6 +26,12 @@ from bomesh.services.agent_runtime import (
 _EMPTY_CONTENT = "No matching access-permitted enterprise documents were found."
 _TIMEOUT_ERROR = "Knowledge search timed out. Please try again."
 _FAILURE_ERROR = "Knowledge search is temporarily unavailable. Please try again."
+_READING_INTRODUCTION = (
+    "How the queries were read against the workspace taxonomy. Say how you read the "
+    "question when it matters; when a term has several readings, the evidence is "
+    "grouped per reading (its Reading line): answer per reading or ask which one "
+    "the user means.\n"
+)
 
 
 class AgentKnowledgeSearchService:
@@ -34,9 +42,10 @@ class AgentKnowledgeSearchService:
         retriever: KnowledgeRetriever,
         *,
         result_limit: int = 5,
+        context_chunks: int = 0,
         max_queries: int = 3,
         timeout_seconds: float = 25.0,
-        max_context_characters: int = 8_000,
+        max_context_characters: int = 16_000,
         max_evidence_characters: int = 1_600,
         context_builder: ContextBuilder | None = None,
         tracer: Tracer | None = None,
@@ -51,9 +60,12 @@ class AgentKnowledgeSearchService:
             raise ValueError("timeout_seconds must be greater than zero")
         if max_context_characters < 1 or max_evidence_characters < 1:
             raise ValueError("context limits must be greater than zero")
+        if context_chunks < 0:
+            raise ValueError("context_chunks must not be negative")
 
         self._retriever = retriever
         self._result_limit = result_limit
+        self._context_chunks = context_chunks
         self._max_queries = max_queries
         self._timeout_seconds = timeout_seconds
         self._context_builder = context_builder or EvidenceContextBuilder(
@@ -81,17 +93,15 @@ class AgentKnowledgeSearchService:
             )
 
         started_at = perf_counter()
-        evidence, failure = await self._retrieve(queries, context, call_id)
-        evidence = [
-            replace(item, id=references.reference(item.item_id, item.chunk_id))
-            for item in evidence
-        ]
+        retrieval, failure = await self._retrieve(queries, context, call_id)
+        evidence = _referenced(retrieval.evidence, references)
+        reading = _reading_text(retrieval.interpretations)
         duration_ms = self._duration_ms(started_at)
 
         built = self._context_builder.build(evidence) if evidence else None
         if built is not None and built.evidence:
             return AgentKnowledgeSearchResult(
-                content=built.text,
+                content=reading + built.text,
                 evidence=built.evidence,
                 outcome="success",
                 success_criteria_met=True,
@@ -106,7 +116,7 @@ class AgentKnowledgeSearchService:
                 duration_ms=duration_ms,
             )
         return AgentKnowledgeSearchResult(
-            content=_EMPTY_CONTENT,
+            content=reading + _EMPTY_CONTENT,
             outcome="empty",
             success_criteria_met=False,
             duration_ms=duration_ms,
@@ -117,8 +127,9 @@ class AgentKnowledgeSearchService:
         queries: list[str],
         context: RetrievalContext,
         call_id: str,
-    ) -> tuple[list[Evidence], str | None]:
-        """One retrieval for every query: fused candidates, one ranking."""
+    ) -> tuple[Retrieval, str | None]:
+        """One retrieval for every query: fused candidates, one ranking (one list per
+        reading of an ambiguous query), and how the queries were read."""
 
         started_at = perf_counter()
         with self._tracer.span(
@@ -132,17 +143,20 @@ class AgentKnowledgeSearchService:
         ) as trace:
             try:
                 async with asyncio.timeout(self._timeout_seconds):
-                    evidence = await self._retriever.search(
+                    retrieval = await self._retriever.search_interpreted(
                         queries,
                         limit=self._result_limit,
                         ctx=context,
+                        context_chunks=self._context_chunks,
                     )
             except TimeoutError:
-                return [], self._failed(trace, "timeout", started_at)
+                return Retrieval(evidence=[]), self._failed(trace, "timeout", started_at)
             except ValueError:
-                return [], self._failed(trace, "invalid_query", started_at)
+                return Retrieval(evidence=[]), self._failed(trace, "invalid_query", started_at)
             except Exception:  # noqa: BLE001 - retrieval errors are model observations
-                return [], self._failed(trace, "retrieval_failure", started_at)
+                return Retrieval(evidence=[]), self._failed(trace, "retrieval_failure", started_at)
+
+            evidence = retrieval.evidence
 
             trace.set_output(
                 TraceSerializer.full(
@@ -159,7 +173,7 @@ class AgentKnowledgeSearchService:
                     )
                 )
             )
-            return evidence, None
+            return retrieval, None
 
     def _failed(
         self,
@@ -210,6 +224,39 @@ class AgentKnowledgeSearchService:
     @staticmethod
     def _duration_ms(started_at: float) -> int:
         return round((perf_counter() - started_at) * 1_000)
+
+
+def _referenced(evidence: list[Evidence], references: CitationReferences) -> list[Evidence]:
+    """Every match and context part with its run-scoped reference; matches are numbered first."""
+
+    def cite(item: Evidence) -> Evidence:
+        return replace(item, id=references.reference(item.item_id, item.chunk_id))
+
+    matches = [cite(item) for item in evidence]
+    return [
+        replace(
+            match,
+            context_before=tuple(cite(part) for part in match.context_before),
+            context_after=tuple(cite(part) for part in match.context_after),
+        )
+        for match in matches
+    ]
+
+
+def _reading_text(interpretations: tuple[QueryInterpretation, ...]) -> str:
+    """The queries' readings for the model, before the evidence; empty when none names
+    a concept."""
+    lines: list[str] = []
+    for interpretation in interpretations:
+        parts = list(interpretation.concepts)
+        if interpretation.ambiguity is not None:
+            options = "; ".join(f'"{option}"' for option in interpretation.options)
+            parts.append(f'"{interpretation.ambiguity}" has several readings: {options}')
+        if parts:
+            lines.append(f'- "{interpretation.query}": ' + "; ".join(parts))
+    if not lines:
+        return ""
+    return _READING_INTRODUCTION + "\n".join(lines) + "\n\n"
 
 
 __all__ = ["AgentKnowledgeSearchService"]

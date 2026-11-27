@@ -17,9 +17,10 @@ import logging
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from bomesh.document_index import ClassificationRequest, EmbeddingRejectedError
+from bomesh.document_index import EmbeddingRejectedError
 from bomesh.errors import StatusCode
 from bomesh.services import (
     DocumentNotFoundError,
@@ -37,6 +38,7 @@ from bomesh.services.ingestion.run_engine import (
     LockClaim,
     OwnershipLost,
     RunClassification,
+    classifies_only,
     reads_images,
 )
 from bomesh.services.knowledge_items.archive_expansion import ArchiveExpansionService
@@ -45,6 +47,9 @@ from bomesh.services.knowledge_items.indexing import (
     PhaseRecorder,
     failure_message,
 )
+
+if TYPE_CHECKING:
+    from bomesh.services.taxonomy.classification import ClassificationPlan
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +133,8 @@ class RunExecutor:
         self._refusal: str | None = None
         #: The run's ``readImages`` (fixed at creation), read when the run is recovered.
         self._read_images = False
+        #: The run's ``classifyOnly``: CLASSIFYING alone, on the Documents' current index.
+        self._classify_only = False
 
     def interrupt(self, reason: Interruption) -> None:
         """Stop executing for ``reason``; the first reason given wins.
@@ -173,12 +180,11 @@ class RunExecutor:
                 return
             watcher = asyncio.create_task(self._watch())
             self._read_images = reads_images(run.configuration)
-            classification = await self._ingestion.classification_request(
+            self._classify_only = classifies_only(run.configuration)
+            plan = await self._ingestion.classification_plan(
                 run.tenant_id, RunClassification.from_configuration(run.configuration)
             )
-            refusal = await self._execute(
-                run.tenant_id, next_batch, parallelism, classification, in_flight
-            )
+            refusal = await self._execute(run.tenant_id, next_batch, parallelism, plan, in_flight)
             await _stop(watcher)
             if refusal is None:
                 await self._runs.finish(self.run_id, outcome="succeeded", owner=self._claim())
@@ -209,7 +215,7 @@ class RunExecutor:
         self,
         tenant_id: UUID,
         item_ids: list[UUID],
-        classification: ClassificationRequest | None = None,
+        plan: ClassificationPlan | None = None,
     ) -> None:
         """Process a batch's Documents one after another.
 
@@ -230,7 +236,7 @@ class RunExecutor:
                     return
                 if not await self._runs.claim_item(self.run_id, item_id, owner=self._claim()):
                     continue
-                await self._process_item(tenant_id, item_id, PhaseRecorder(), classification)
+                await self._process_item(tenant_id, item_id, PhaseRecorder(), plan)
 
     # -- Orchestration -----------------------------------------------------------
 
@@ -239,7 +245,7 @@ class RunExecutor:
         tenant_id: UUID,
         next_batch: int,
         parallelism: int,
-        classification: ClassificationRequest | None,
+        plan: ClassificationPlan | None,
         in_flight: dict[asyncio.Task[None], int],
     ) -> str | None:
         """Plan and run every batch; the provider's refusal when it stopped the run."""
@@ -262,7 +268,7 @@ class RunExecutor:
                     await _wait_one(in_flight)
                 if self._refusal is not None:
                     break
-                task = asyncio.create_task(self._batch(tenant_id, number, item_ids, classification))
+                task = asyncio.create_task(self._batch(tenant_id, number, item_ids, plan))
                 in_flight[task] = number
                 next_batch = number + 1
         while in_flight:
@@ -274,11 +280,11 @@ class RunExecutor:
         tenant_id: UUID,
         number: int,
         item_ids: list[UUID],
-        classification: ClassificationRequest | None,
+        plan: ClassificationPlan | None,
     ) -> None:
         for attempt in range(1, self._retry.attempts + 1):
             try:
-                await self.process_batch(tenant_id, item_ids, classification)
+                await self.process_batch(tenant_id, item_ids, plan)
                 return
             except ProviderRefused:
                 return
@@ -336,11 +342,11 @@ class RunExecutor:
         tenant_id: UUID,
         item_id: UUID,
         recorder: PhaseRecorder,
-        classification: ClassificationRequest | None,
+        plan: ClassificationPlan | None,
     ) -> None:
         persisting = asyncio.create_task(self._persist_phases(item_id, recorder))
         try:
-            chunk_count = await self._process(tenant_id, item_id, recorder, classification)
+            chunk_count = await self._process(tenant_id, item_id, recorder, plan)
         except asyncio.CancelledError:
             await _stop(persisting)
             if self._interruption in (None, Interruption.CANCELLED):
@@ -415,8 +421,14 @@ class RunExecutor:
         tenant_id: UUID,
         item_id: UUID,
         recorder: PhaseRecorder,
-        classification: ClassificationRequest | None,
+        plan: ClassificationPlan | None,
     ) -> int | None:
+        if self._classify_only:
+            # CLASSIFYING alone on the current index: no expansion, chunking or embedding.
+            await self._ingestion.classify_document(
+                item_id, tenant_id=tenant_id, progress=recorder, plan=plan
+            )
+            return None
         expanded = await self._archives.expand_if_archive(
             item_id,
             tenant_id=tenant_id,
@@ -433,7 +445,7 @@ class RunExecutor:
             item_id,
             tenant_id=tenant_id,
             progress=recorder,
-            classification=classification,
+            plan=plan,
             read_images=self._read_images,
         )
 

@@ -7,10 +7,11 @@
    2. Getting started (members in their first 30 days, until done or hidden) — or Jump back in (recent reads and chat) for everyone else.
       A new member's first visit, once Home has loaded, opens the welcome card: the product tour (chat.js) or Later.
    3. Picked for you: four documents, each with the reason it was picked (one of your role's questions, one of your spaces,
-      a topic you read, most read).
-   4. Explore by domain: the taxonomy's domains with what they hold, opening Knowledge filtered.
+      more on what you read, most read).
+   4. Explore by domain: the first classification scheme's top concepts (firstScheme(): Lĩnh vực on campus, Subject in
+      enterprise) with what they hold, opening Knowledge filtered.
    What changed lately is not a section of its own: domains count what's new, and Knowledge sorts by Recently updated.
-   Everything comes from what the caller can read (sharedPool) and the per-document insights: summary, topics, trust, views,
+   Everything comes from what the caller can read (sharedPool) and the per-document insights: summary, concepts, trust, views,
    freshness. The full tree of collections is Knowledge › Map (features/atlas.js). Prefix: home-. */
 (() => {
   const NEW_FOR = 30 * DAY;   // how long a member counts as new
@@ -42,7 +43,8 @@
     }).filter(Boolean);
   }
   /** Four documents for the caller, each with why: one per starter question of their group or role, then their spaces,
-      the topics of what they read, then the most read in the domains those questions are about. Nothing already saved or opened. */
+      the concepts of what they read, then the most read in the domains those questions are about. Nothing already saved or opened.
+      “About” is the first scheme (Lĩnh vực, Subject): the other schemes say what a document is or is for, not what it covers. */
   function picks(pool) {
     const seen = Object.fromEntries([...userList('saved'), ...userList('recent').map(x => x.doc)].map(id => [id, true]));
     const fresh = pool.filter(d => !seen[d.id]);
@@ -52,29 +54,32 @@
     const spaces = Object.fromEntries(mySpaces().map(s => [s.id, s]));
     const inSpace = best(fresh, d => ((d.contexts || []).some(id => spaces[id]) ? 1 + d.updated / NOW : 0))
       .map(d => ({ d, why: { icon: 'layers', label: `In ${spaces[d.contexts.find(id => spaces[id])].name}` } }));
-    const readTopics = {};
-    userList('recent').forEach(x => { const d = docById(x.doc); if (d && canOpenRes(d)) resTopics(d).forEach(t => { readTopics[t] = (readTopics[t] || 0) + 1; }); });
-    const related = best(fresh, d => resTopics(d).reduce((a, t) => a + (readTopics[t] || 0), 0))
-      .map(d => ({ d, why: { icon: 'tag', label: `More on ${topicName(resTopics(d).find(t => readTopics[t]))}` } }));
-    // The domains of the role's questions (and of what the caller read) say what's relevant to them; the most read comes from there.
-    const domainOf = t => topicById(t)?.parent || t;
+    const first = firstScheme()?.id, about = d => resConcepts(d).filter(id => conceptById(id).scheme === first);
+    const readConcepts = {};
+    userList('recent').forEach(x => { const d = docById(x.doc); if (d && canOpenRes(d)) about(d).forEach(c => { readConcepts[c] = (readConcepts[c] || 0) + 1; }); });
+    const related = best(fresh, d => about(d).reduce((a, c) => a + (readConcepts[c] || 0), 0))
+      .map(d => ({ d, why: { icon: 'tag', label: `More on ${conceptName(about(d).find(c => readConcepts[c]))}` } }));
+    // The top concepts of the role's questions (and of what the caller read) say what's relevant to them; the most read comes from there.
     const near = {};
-    [...answered.map(x => x.d), ...Object.keys(readTopics).map(t => ({ topics: [t] }))].forEach(d => resTopics(d).forEach(t => { near[domainOf(t)] = true; }));
+    [...answered.map(x => about(x.d)), Object.keys(readConcepts)].forEach(ids => ids.forEach(c => { near[conceptTop(c)] = true; }));
     const anyNear = Object.keys(near).length > 0;
-    const popular = best(fresh, d => (!anyNear || resTopics(d).some(t => near[domainOf(t)]) ? 1 + (d.views || 0) : 0)).map(d => ({ d, why: { icon: 'eye', label: 'Most read' } }));
+    const popular = best(fresh, d => (!anyNear || about(d).some(c => near[conceptTop(c)]) ? 1 + (d.views || 0) : 0)).map(d => ({ d, why: { icon: 'eye', label: 'Most read' } }));
     const out = [];
     [inSpace[0], asked[0], related[0], asked[1], asked[2], inSpace[1], related[1], ...popular].forEach(p => {
       if (p && out.length < PICKS && !out.some(x => x.d.id === p.d.id)) out.push(p);
     });
     return out;
   }
-  /** Domains that hold readable documents, largest first: count, new this month, their three biggest topics. */
+  /** The first scheme's top concepts that hold readable documents, largest first: count (narrower concepts included, each
+      document once), new this month, their three biggest narrower concepts. */
   function domains(pool) {
-    return topicTree().map(dm => {
-      const inDomain = Object.fromEntries([dm.id, ...dm.children.map(t => t.id)].map(id => [id, true]));
-      const docs = pool.filter(d => resTopics(d).some(t => inDomain[t]));
-      const top = dm.children.map(t => ({ t, n: docs.filter(d => resTopics(d).includes(t.id)).length })).filter(x => x.n).sort((a, b) => b.n - a.n).slice(0, 3);
-      return { dm, n: docs.length, fresh: docs.filter(d => NOW - d.updated < FRESH).length, top };
+    const s = firstScheme(); if (!s) return [];
+    const mine = new Map(pool.map(d => [d.id, new Set(resConcepts(d))]));
+    const under = id => { const ids = [id, ...descendantsOf(id)]; return pool.filter(d => ids.some(x => mine.get(d.id).has(x))); };
+    return topConcepts(s.id).map(c => {
+      const docs = under(c.id);
+      const top = narrowerOf(c.id).map(k => ({ c: k, n: under(k.id).length })).filter(x => x.n).sort((a, b) => b.n - a.n).slice(0, 3);
+      return { c, n: docs.length, fresh: docs.filter(d => NOW - d.updated < FRESH).length, top };
     }).filter(x => x.n).sort((a, b) => b.n - a.n);
   }
 
@@ -156,17 +161,20 @@
     </article>`;
   }
 
-  function domainCard({ dm, n, fresh, top }) {
-    return `<article class="home-domain" style="--tone:${esc(dm.color || 'var(--accent)')}">
+  /** A top concept of the first scheme: its icon in its color (conceptLook), name, count, what's new, its definition and its
+      biggest narrower concepts — each opening Browse filtered to it (conceptHref). */
+  function domainCard({ c, n, fresh, top }) {
+    const l = conceptLook(c.id);
+    return `<article class="home-domain"${l.style}>
       <div class="home-domain__head">
-        <span class="home-domain__icon" aria-hidden="true">${ic(dm.icon || 'tag')}</span>
+        <span class="home-domain__icon" aria-hidden="true">${ic(l.icon)}</span>
         <div class="home-domain__titles">
-          <h3 class="home-domain__name"><a class="home-domain__link" href="#${X.res.topicHref(dm.id)}" translate="no">${esc(dm.name)}</a></h3>
+          <h3 class="home-domain__name"><a class="home-domain__link" href="#${conceptHref(c.id)}" translate="no">${esc(conceptName(c.id))}</a></h3>
           <p class="home-domain__meta"><span>${plural(n, 'document')}</span>${fresh ? `<span class="res-dot" aria-hidden="true">·</span><span class="home-domain__new">${esc(`${fresh} new`)}</span>` : ''}</p>
         </div>
       </div>
-      ${dm.desc ? `<p class="home-domain__desc" translate="no">${esc(dm.desc)}</p>` : ''}
-      ${top.length ? `<div class="home-domain__topics">${top.map(x => `<a class="home-topic" href="#${X.res.topicHref(x.t.id)}" translate="no">${esc(x.t.name)}</a>`).join('')}</div>` : ''}
+      ${c.definition ? `<p class="home-domain__desc" translate="no">${esc(c.definition)}</p>` : ''}
+      ${top.length ? `<div class="home-domain__concepts">${top.map(x => `<a class="home-concept" href="#${conceptHref(x.c.id)}" translate="no">${esc(conceptName(x.c.id))}</a>`).join('')}</div>` : ''}
     </article>`;
   }
 

@@ -61,7 +61,7 @@
     if (cur?.state === 'RUNNING') Object.assign(cur, { state: 'SKIPPED', end: now });
     Object.assign(t, { state: 'cancelled', end: now });
   }
-  /** One document read, classified and indexed: the assistant applies the topics it picks when nobody chose any,
+  /** One document read, classified and indexed: the assistant files it under the concepts it picks in every scheme nobody filled,
       within the run's classification context (`ctx`) when it has one. A submission's file is classified for its reviewer
       instead: its suggestion becomes what the assistant chose (aiOf), and it moves on to Documents → Review. */
   function finishOne(d, ctx = null) {
@@ -122,7 +122,7 @@
   X.processDocs = processDocs;
   /** Many documents at once (Documents → Process): one processing run (an ingestion run over the selection) that works
       through them in chunks, so the page shows how far it is. Processing never publishes. `context`: what the classify
-      step works with — { topics: [ids] (empty = all topics), note } or null. `readImages`: the vision model reads text in pictures. */
+      step works with — { concepts: [ids] (empty = every concept), note } or null. `readImages`: the vision model reads text in pictures. */
   function processRun(docs, { context = null, readImages = false } = {}) {
     docs = docs.filter(processable);
     if (!docs.length) return null;
@@ -678,7 +678,7 @@
     'fx-eng-adr027': () => build(b => {
       b.page(1).title('ADR-027 — Event-driven ledger updates', 'Status: Accepted · Core Banking Modernization · Deciders: Lê Thu Hà, Nguyễn Hoàng Nam')
         .h('Context').p('Services wrote directly to ledger tables, so balances could change without an auditable event and reconciliation found breaks every day.')
-        .h('Decision').p('Ledger balances are updated only by consuming events from the payments topic, never by direct writes.')
+        .h('Decision').p('Ledger balances are updated only by consuming events from the payments event stream, never by direct writes.')
         .ul(['Producers publish PaymentPosted, PaymentReversed and FeeCharged events.', 'The ledger service is the only consumer allowed to change balances.', 'Events are kept for 7 days on the stream and forever in the event archive.']);
       b.page(2).h('Consequences').p('Ledger consumers must process each event exactly once, so the streaming platform must support exactly-once delivery or idempotent consumption.')
         .p('Choosing the streaming platform is tracked in the event streaming evaluation.');
@@ -694,8 +694,8 @@
     }),
     'fx-eng-eval-kafka': () => evalDoc('Evaluation — Confluent Cloud (Kafka)', 'Managed Apache Kafka on Confluent Cloud', [
       'In our load test Confluent Cloud sustained 180,000 messages per second at a p99 latency of 42 ms.',
-      'Idempotent producers and transactions give exactly-once delivery between Kafka topics out of the box.',
-      'Brokers, upgrades and scaling are run by the vendor; our team only manages topics, ACLs and connectors.',
+      'Idempotent producers and transactions give exactly-once delivery between Kafka streams out of the box.',
+      'Brokers, upgrades and scaling are run by the vendor; our team only manages streams, ACLs and connectors.',
       'The nearest Confluent Cloud region is Singapore; no region is available in Vietnam.',
       'The estimated three-year cost is USD 1.26 million, including support and private networking.',
     ], 'Strongest on throughput and operations effort; data residency needs a cross-border transfer assessment before payment events can leave Vietnam.'),
@@ -797,7 +797,7 @@
         .h('Your first day').ul(['Collect your laptop and badge from the IT Service Desk, floor 12.', 'Sign in to BoMesh to find policies, ask questions and send requests.', 'Meet your buddy for lunch.']);
       b.page(2).h('Your first week').ul(['Complete the Data privacy and Secure coding (engineers) trainings.', 'Read the Code of Conduct and the Access Control Policy.', 'Join your team channels and the #finx-general channel.']);
       b.page(3).h('Your first month').ul(['Agree on goals with your manager.', 'Attend the new joiner session with the leadership team.', 'Engineers: shadow one on-call week before joining the rotation.']);
-      b.page(4).h('Who to ask').table(['Topic', 'Where'], [['Laptop, accounts, access', 'IT Service Desk (BoMesh Requests)'], ['Policies and compliance', 'Risk & Compliance'], ['Pay, leave and benefits', 'People & Culture']]);
+      b.page(4).h('Who to ask').table(['Question', 'Where'], [['Laptop, accounts, access', 'IT Service Desk (BoMesh Requests)'], ['Policies and compliance', 'Risk & Compliance'], ['Pay, leave and benefits', 'People & Culture']]);
     }),
     'fx-lead-budget': () => build(b => {
       b.page(1).sheet(['Cost center', 'FY2026 actual (VND bn)', 'FY2027 plan (VND bn)', 'Change', 'Owner'], [
@@ -901,7 +901,8 @@
     const r = res(doc), base = doc.name.replace(/\.[^.]+$/, '');
     const subject = base.replace(/^(notice|news|thông báo|syllabus|lab guide|lab protocol)\s*[—–-]\s*/i, '').replace(/\s*[—–-]\s*(FME|FEEE)$/, '');
     const m = base.match(/^(?:Syllabus\s*[—–-]\s*)?([A-Z]{2}\d{4})\s+(.+)$/);
-    return { r, base, subject, code: m?.[1] || '', rest: m?.[2] || base, lead: doc.summary || '', owner: r.owner || r.kb?.name || curWs().name, org: curWs().name, topic: r.topics[0] ? topicName(r.topics[0]) : '', date: fmtDate(doc.updated), h: hashOf(doc.id), vi: r.lang === 'vi' };
+    const lead = X.res?.conceptOrder?.(doc)[0];
+    return { r, base, subject, code: m?.[1] || '', rest: m?.[2] || base, lead: doc.summary || '', owner: r.owner || r.kb?.name || curWs().name, org: curWs().name, focus: lead ? conceptName(lead) : '', date: fmtDate(doc.updated), h: hashOf(doc.id), vi: r.lang === 'vi' };
   }
   const people = () => (campus() ? 'all students, lecturers and staff' : 'all employees');
   /** Notices and announcements: matched by title, English or Vietnamese body. */
@@ -924,8 +925,8 @@
       const course = c.rest, credits = 2 + c.h % 3;
       return flow(doc, { title: `${c.code ? c.code + ' ' : ''}${course}`, sub: `Course syllabus · ${c.owner} · ${credits} credits · Approved ${c.date}`, secs: [
         { h: 'Course description', p: [c.lead || `Approved syllabus for ${course}.`, `${course} is a ${credits}-credit course taught over 15 weeks, with lectures, guided lab work and a team project.`] },
-        { h: 'Learning outcomes', p: ['By the end of the course, students can:'], ul: [`Explain the core concepts and vocabulary of ${lc(course)}.`, `Apply ${lc(c.topic || course)} methods to small, well-defined engineering problems.`, 'Design, build and test a team project, and present the results.', 'Read technical material in English and write a clear report.'] },
-        { h: 'Weekly plan', table: [['Weeks', 'Topic'], [['1–2', `Foundations of ${lc(course)}`], ['3–5', 'Core methods and worked examples'], ['6–7', 'Applied practice in the lab'], ['8', 'Midterm exam'], ['9–12', 'Advanced topics'], ['13–14', 'Team project and presentations'], ['15', 'Review']]] },
+        { h: 'Learning outcomes', p: ['By the end of the course, students can:'], ul: [`Explain the core concepts and vocabulary of ${lc(course)}.`, `Apply ${lc(c.focus || course)} methods to small, well-defined engineering problems.`, 'Design, build and test a team project, and present the results.', 'Read technical material in English and write a clear report.'] },
+        { h: 'Weekly plan', table: [['Weeks', 'Content'], [['1–2', `Foundations of ${lc(course)}`], ['3–5', 'Core methods and worked examples'], ['6–7', 'Applied practice in the lab'], ['8', 'Midterm exam'], ['9–12', 'Advanced methods'], ['13–14', 'Team project and presentations'], ['15', 'Review']]] },
         { h: 'Assessment', p: ['The course is assessed through participation and quizzes (10%), labs and assignments (30%), a midterm exam (20%) and a final exam (40%).'], table: [['Component', 'Weight'], [['Participation and quizzes', '10%'], ['Labs and assignments', '30%'], ['Midterm exam', '20%'], ['Final exam', '40%']]], after: ['Students must score at least 4.0 out of 10 on the final exam to pass the course.', 'Students who miss more than 20% of classes can’t sit the final exam.'] },
         { h: 'Required readings', ul: [`Lecture notes for ${c.code || course}, published weekly on the learning platform.`, `A core textbook on ${lc(course)} chosen by the course coordinator.`, 'Papers and lab handouts listed in each week’s module.'] },
         { h: 'Course policies', ul: ['Late submissions lose 10% a day and aren’t accepted after three days.', 'Copying code or text without attribution is reported under the academic integrity rules.', 'Questions about grades go to the lecturer first, then to the Faculty office.'] },
@@ -934,7 +935,9 @@
     thesis: (doc, c) => {
       const title = c.base.replace(/\s+[—–-]\s+(MSc|BEng) thesis \d{4}$/, ''), msc = /MSc thesis/.test(c.base);
       const author = doc.author || doc.addedBy, year = doc.year || new Date(doc.updated).getFullYear();
-      const t = c.r.topics.join(' '), metric = /t-ml|t-cropdisease|t-sensing/.test(t) ? 'accuracy' : /t-net/.test(t) ? 'detection rate' : /t-iot|t-elec|t-irrigation/.test(t) ? 'energy saving' : /t-mech/.test(t) ? 'task success rate' : /t-db/.test(t) ? 'query speed-up' : 'test coverage';
+      // The measure follows what the thesis is filed under (concept names and paths) and its title.
+      const t = fold([c.base, ...c.r.concepts.map(conceptPathText)].join(' '));
+      const metric = /hoc may|machine learning|thi giac|vision|benh cay|crop disease|cam bien|sensing/.test(t) ? 'accuracy' : /mang may tinh|network/.test(t) ? 'detection rate' : /\biot\b|ky thuat dien|nang luong|electric|tuoi tieu|irrigation/.test(t) ? 'energy saving' : /co khi|robot|mechan/.test(t) ? 'task success rate' : /co so du lieu|database/.test(t) ? 'query speed-up' : 'test coverage';
       const base = 68 + c.h % 14, prop = base + 4 + c.h % 9, sup = ['the faculty supervisor', 'the lab supervisor', 'the programme supervisor'][c.h % 3];
       return flow(doc, { title, sub: `${msc ? 'Master of Science' : 'Bachelor of Engineering'} thesis · ${author} · ${year} · Supervisor: ${sup}`, per: 1, secs: [
         { h: 'Abstract', p: [c.lead || `Thesis by ${author} (${year}): ${title}.`, `We build a working prototype, evaluate it against a baseline on data collected for this study, and report where it helps and where it doesn’t.`, `The proposed approach reaches ${prop}% ${metric}, compared with ${base}% for the baseline.`, ...(c.vi ? [`Tóm tắt: Luận văn nghiên cứu đề tài “${title}”. Phương pháp đề xuất đạt ${prop}% so với ${base}% của phương pháp cơ sở.`] : [])] },
@@ -1021,7 +1024,7 @@
       const base = 70 + c.h % 15, gain = 3 + c.h % 9;
       return flow(doc, { title, sub: [authors, c.r.kb?.name].filter(Boolean).join(' · '), secs: [
         { h: 'Abstract', p: [c.lead || `We study ${lc(title)}.`, `Compared with a strong baseline, our approach improves the main metric from ${base}% to ${base + gain}% on held-out field data.`] },
-        { h: '1 Introduction', p: [`${c.topic || 'This problem'} is hard to solve in real conditions: data are noisy, labels are expensive and devices are limited.`] },
+        { h: '1 Introduction', p: [`${c.focus || 'This problem'} is hard to solve in real conditions: data are noisy, labels are expensive and devices are limited.`] },
         { h: '2 Method', p: ['Our method: we collected data in the field, labelled it with domain experts and evaluated each model with 5-fold cross-validation.'], ul: ['Data: field samples from several sites and seasons.', 'Models: a published baseline and the proposed approach.', 'Metric: the main score on a held-out test set.'] },
         { h: '3 Results', table: [['Method', 'Main metric (%)'], [['Baseline', String(base)], ['Proposed', String(base + gain)]]], after: [`The main result: the proposed method gains ${gain} points over the baseline, with the largest gains under field conditions.`] },
         { h: '4 Discussion', p: ['Most remaining errors come from rare classes and poor lighting. Gains are smaller on clean lab data.'] },
@@ -1115,7 +1118,7 @@
   };
   KIND.handbook = KIND.guide;
 
-  /* Quoted passages: the seed data (conversations, saved answers, reviews, request checks, the assistant's topic tables, the
+  /* Quoted passages: the seed data (conversations, saved answers, reviews, request checks, the assistant's comparison tables, the
      research bank) quotes documents whose body is generated here. Those passages are part of the document. They are
      collected once, from the seed, before saved data is restored — so a document's Structured Document, and every ref
      into it, never changes with what someone did in the prototype. Seed citations are { item, highlights: [{ pageNumber }], quote }. */

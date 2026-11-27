@@ -575,7 +575,7 @@
     return {
       size: 'lg', title: 'Link documents', icon: 'link-2',
       desc: 'Show documents from other collections in Materials and use them in workflows. Who can open them doesn’t change.',
-      body: `${dlgSearch('splr-q', 'spLinkRes.q', f.q, 'Search by title or topic')}
+      body: `${dlgSearch('splr-q', 'spLinkRes.q', f.q, 'Search by title or subject')}
         ${rows ? `<div class="option-list sp-options mt-12" id="splr-list" data-keep-scroll role="group" aria-label="Documents">${rows}</div>` : `<p class="t-sm muted sp-options__empty">${f.q ? 'No documents match. Try another word.' : 'Every document you can read is already here.'}</p>`}${pickError(f.err)}`,
       footStart: n ? `${plural(n, 'document')} selected` : 'They stay in their collection.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn(n ? `Link ${plural(n, 'document')}` : 'Link documents', { v: 'primary', icon: 'link-2', act: 'sp-link-res-go' }),

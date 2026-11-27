@@ -467,7 +467,11 @@ class RetrievalConfig:
 
     hybrid_candidate_limit: int = 20
     final_top_k: int = 6
-    context_characters: int = 8_000
+    #: The agent's knowledge_search result: matches first, then their context.
+    context_characters: int = 16_000
+    #: Neighbouring chunks each match brings on each side (same revision, same
+    #: heading or sheet); 0 gives matches alone.
+    context_chunks: int = 1
     #: Off by default: the fused RRF order is used. The LLM reranker stays an
     #: optional relevance gate with its own deadline inside the retriever.
     reranking_enabled: bool = False
@@ -492,6 +496,8 @@ class RetrievalConfig:
             raise ValueError("rerank timeout must be greater than zero")
         if self.query_embedding_cache_size < 0:
             raise ValueError("query embedding cache size must not be negative")
+        if self.context_chunks < 0:
+            raise ValueError("retrieval context chunks must not be negative")
         if self.search_deadline_seconds <= 0:
             raise ValueError("search deadline must be greater than zero")
 
@@ -505,8 +511,9 @@ class RetrievalConfig:
             ),
             final_top_k=integer("BOMESH_FINAL_RETRIEVAL_TOP_K", default=6),
             context_characters=integer(
-                "BOMESH_RETRIEVAL_CONTEXT_CHARACTERS", default=8_000
+                "BOMESH_RETRIEVAL_CONTEXT_CHARACTERS", default=16_000
             ),
+            context_chunks=integer("BOMESH_RETRIEVAL_CONTEXT_CHUNKS", default=1),
             reranking_enabled=boolean("BOMESH_RERANKING_ENABLED", default=False),
             rerank_timeout_seconds=number(
                 "BOMESH_RERANK_TIMEOUT_SECONDS", default=8.0

@@ -10,19 +10,19 @@ import { ApiError, errorMessage } from "@/lib/api/client";
 import { fmtSize, plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { KnowledgeModal } from "@/modules/knowledge/components/KnowledgeModal";
-import { TopicPicker } from "@/modules/knowledge/components/TopicPicker";
-import { topicTree } from "@/modules/knowledge/model";
+import { ConceptPicker } from "@/modules/knowledge/components/ConceptPicker";
 import { useKnowledgeModel } from "@/modules/knowledge/queries";
+import { assignableConcepts, classSchemes } from "@/modules/knowledge/taxonomy";
 
-import { collectionTopicUse, createIngestionRun, type IngestionRun } from "../api";
+import { collectionConceptUse, createIngestionRun, type IngestionRun } from "../api";
 import { aipString } from "../docFilter";
 import type { DocRow } from "../model";
 import { useInvalidateCuration } from "../queries";
 
 /** A run selects at most this many explicit documents; more go as a filter by name. */
 const MAX_ITEMS = 1000;
-/** "Use {collection}'s topics" loads at most this many. */
-const USUAL_TOPICS = 8;
+/** "Use {collection}'s usual concepts" loads at most this many per collection. */
+const USUAL_CONCEPTS = 8;
 const NOTE_MAX = 1000;
 
 export interface ProcessRequest {
@@ -30,17 +30,17 @@ export interface ProcessRequest {
   rows: readonly DocRow[];
   /** "Select all matching": the list's document filter (no count, no estimate). */
   filter?: string;
-  /** Collections the selection comes from (full item names), for "Use {collection}'s topics". */
+  /** Collections the selection comes from (full item names), for "Use {collection}'s usual concepts". */
   collections: readonly string[];
 }
 
 const VISION_UNAVAILABLE = "Hệ thống chưa thiết lập cách đọc chữ trong hình ảnh. Hãy xử lý mà không đọc hình ảnh, hoặc nhờ quản trị viên nền tảng.";
 
 /**
- * The Process dialog (preview `M['cur-process']`): one decision — which topics the AI may suggest (All topics |
- * Selected) — one optional input (context for the AI) and the action. Starts one ingestion run; it never publishes.
- * Images: `readImages` (off by default) has the vision model read text in every picture.
- * `classification` goes along only when topics are chosen or a note is given.
+ * The Process dialog (preview `M['cur-process']`): one decision — which concepts the assistant may use (All | Selected,
+ * across the classification schemes; a whole branch at once) — one optional input (context for the AI) and the action.
+ * Starts one ingestion run; it never publishes. Images: `readImages` (off by default) has the vision model read text in
+ * every picture. `classification` goes along only when concepts are chosen or a note is given.
  */
 export function ProcessDialog({ request, onClose, onStarted }: { request: ProcessRequest | null; onClose: () => void; onStarted: (run: IngestionRun, total: number | null) => void }) {
   return request ? <ProcessForm request={request} onClose={onClose} onStarted={onStarted} /> : null;
@@ -48,7 +48,7 @@ export function ProcessDialog({ request, onClose, onStarted }: { request: Proces
 
 function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest; onClose: () => void; onStarted: (run: IngestionRun, total: number | null) => void }) {
   const { id: ws } = useWorkspace();
-  const { ctx, topics } = useKnowledgeModel();
+  const { ctx, taxonomy } = useKnowledgeModel();
   const invalidate = useInvalidateCuration();
   const [scope, setScope] = useState<"all" | "chosen">("all");
   const [chosen, setChosen] = useState<string[]>([]);
@@ -61,48 +61,49 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
   const all = !!request.filter;
   const n = request.rows.length;
   const bytes = request.rows.reduce((s, r) => s + Number(r.item?.document?.sizeBytes ?? 0), 0);
-  const leaves = topicTree(topics).flatMap((d) => d.children);
-  const live = new Set(leaves.map((t) => t.name ?? ""));
+  // Every concept the assistant may file under: the published, assignable concepts of the classification schemes.
+  const assignable = classSchemes(taxonomy).flatMap((s) => assignableConcepts(taxonomy, s.name ?? ""));
+  const live = new Set(assignable.map((c) => c.name ?? ""));
 
-  // The collections' usual topics: what their documents carry most (active topics only, at most eight each).
+  // The collections' usual concepts: what their documents are filed under most (assignable ones, at most eight each).
   const usual = useQuery({
-    queryKey: [ws, "items", "collection-topics", ...request.collections] as const,
-    queryFn: async () => (await Promise.all(request.collections.map((c) => collectionTopicUse(ws, c)))).map((list) => list.filter((t) => live.has(t)).slice(0, USUAL_TOPICS)),
-    enabled: scope === "chosen" && request.collections.length > 0 && leaves.length > 0,
+    queryKey: [ws, "items", "collection-concepts", ...request.collections] as const,
+    queryFn: async () => (await Promise.all(request.collections.map((c) => collectionConceptUse(ws, c)))).map((list) => list.filter((c) => live.has(c)).slice(0, USUAL_CONCEPTS)),
+    enabled: scope === "chosen" && request.collections.length > 0 && live.size > 0,
     staleTime: 60_000,
   });
-  const usualTopics = [...new Set((usual.data ?? []).flat())];
-  const loadable = (usual.data ?? []).some((list) => list.some((t) => !chosen.includes(t)));
+  const usualConcepts = [...new Set((usual.data ?? []).flat())];
+  const loadable = (usual.data ?? []).some((list) => list.some((c) => !chosen.includes(c)));
   const one = request.collections.length === 1 ? ctx.collectionNames?.get(request.collections[0]) || "kho tài liệu" : "";
 
   const pickScope = (v: "all" | "chosen") => {
     setScope(v);
     setTried(false);
   };
-  // Selected starts from the collection's usual topics when the selection comes from one collection.
+  // Selected starts from the collection's usual concepts when the selection comes from one collection.
   const [seeded, setSeeded] = useState(false);
   if (scope === "chosen" && !seeded && request.collections.length === 1 && usual.data) {
     setSeeded(true);
-    if (!chosen.length) setChosen(usualTopics);
+    if (!chosen.length) setChosen(usualConcepts);
   }
 
   const hint =
     scope === "chosen"
       ? chosen.length
-        ? `Trợ lý chỉ gợi ý từ ${plural(chosen.length, "topic")} này.`
-        : "Chọn các chủ đề trợ lý được phép gợi ý."
-      : `Trợ lý gợi ý từ tất cả ${plural(leaves.length, "topic")}.`;
-  const error = scope === "chosen" && tried && !chosen.length ? "Hãy chọn ít nhất một chủ đề, hoặc dùng tất cả chủ đề." : "";
+        ? `Ở các trục bạn chọn, trợ lý chỉ dùng ${plural(chosen.length, "concept")} này và các khái niệm nằm dưới chúng.`
+        : "Chọn các khái niệm trợ lý được dùng."
+      : `Trợ lý được dùng tất cả ${plural(assignable.length, "concept")} trong các trục phân loại của bạn.`;
+  const error = scope === "chosen" && tried && !chosen.length ? "Hãy chọn ít nhất một khái niệm, hoặc dùng tất cả." : "";
   const title = all ? "Xử lý các tài liệu khớp" : `Xử lý ${plural(n, "document")}`;
   const desc = all
-    ? "Trợ lý đọc từng tệp và gợi ý chủ đề. Bạn có thể tiếp tục làm việc."
-    : `Trợ lý đọc từng tệp và gợi ý chủ đề${bytes ? ` (tổng ${fmtSize(bytes)})` : ""}. Bạn có thể tiếp tục làm việc.`;
+    ? "Trợ lý đọc và phân loại từng tệp. Bạn có thể tiếp tục làm việc."
+    : `Trợ lý đọc và phân loại từng tệp${bytes ? ` (tổng ${fmtSize(bytes)})` : ""}. Bạn có thể tiếp tục làm việc.`;
 
   const submit = async () => {
     setTried(true);
     if (scope === "chosen" && !chosen.length) return;
     const text = note.trim();
-    const classification = scope === "chosen" || text ? { topics: scope === "chosen" ? chosen : [], note: text } : undefined;
+    const classification = scope === "chosen" || text ? { concepts: scope === "chosen" ? chosen : [], note: text } : undefined;
     const items = request.rows.flatMap((r) => (r.item?.name ? [r.item.name] : []));
     const selector = all
       ? { filter: request.filter }
@@ -145,13 +146,13 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
       <div className="proc">
         <section className="proc-sec">
           <div className="proc-sec__head">
-            <h3 className="proc-sec__label">Chủ đề</h3>
+            <h3 className="proc-sec__label">Khái niệm trợ lý được dùng</h3>
             <Segmented
               value={scope}
               onChange={pickScope}
-              label="Chủ đề trợ lý được phép gợi ý"
+              label="Khái niệm trợ lý được dùng"
               options={[
-                { value: "all", label: "Tất cả chủ đề" },
+                { value: "all", label: "Tất cả" },
                 { value: "chosen", label: "Đã chọn" },
               ]}
             />
@@ -162,24 +163,24 @@ function ProcessForm({ request, onClose, onStarted }: { request: ProcessRequest;
               <LinkButton
                 size="sm"
                 onPress={() => {
-                  setChosen([...new Set([...chosen, ...usualTopics])]);
+                  setChosen([...new Set([...chosen, ...usualConcepts])]);
                   setTried(false);
                 }}
               >
-                {one ? `Dùng chủ đề của ${one}` : "Dùng chủ đề của các kho tài liệu chứa chúng"}
+                {one ? `Dùng các khái niệm thường dùng của ${one}` : "Dùng các khái niệm thường dùng của các kho tài liệu chứa chúng"}
               </LinkButton>
             ) : null}
           </p>
           {scope === "chosen" ? (
-            <TopicPicker
+            <ConceptPicker
               value={chosen}
               onChange={(next) => {
                 setChosen(next);
                 setTried(false);
               }}
-              topics={topics}
-              label="Chủ đề đã chọn"
-              domains
+              taxonomy={taxonomy}
+              label="Khái niệm đã chọn"
+              broad
               limit={5}
               quiet
               isDisabled={busy}

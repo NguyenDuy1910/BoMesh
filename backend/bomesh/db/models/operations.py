@@ -37,6 +37,7 @@ OPERATION_VERBS = (
     "exportUsage",
     "createArtifact",
     "reviseArtifact",
+    "publishConceptScheme",
 )
 HEALTH_STATUSES = ("healthy", "degraded", "unhealthy", "not_configured")
 

@@ -236,77 +236,213 @@ contract depends on this local bootstrap.
 
 A run task reports `FETCHING`, `PARSING` (parse and chunk), `CLASSIFYING`,
 `CHUNKING` (contextual retrieval text per chunk), `EMBEDDING` and `INDEXING`.
-`CLASSIFYING` belongs to contextual retrieval and uses the same configured
-contextualization model (`BOMESH_CONTEXTUALIZATION_MODEL`, with reasoning off
-by default: `BOMESH_CONTEXTUALIZATION_REASONING_EFFORT`); it runs only when
-contextualization is enabled and the run has candidate topics. The run's
-`classification` is resolved once into candidates (its topics, a DOMAIN
-standing for its ACTIVE topics, or for itself when it has none; none = every
-ACTIVE topic; a domain is never a candidate beside its own topics), each
-with its classification signals (`keywords`, `synonyms`, `guidance`, the
-titles of its `examples`, its `rules`), and the note. Rules are checked first:
-when a candidate's rule matches the document (an ancestor collection, or the
-source that registered it), the document gets exactly the matching
-candidates and the model is not called, so it gets no summary or title
-suggestion. Otherwise one model call classifies the document. Its prompt has
-two parts:
+`CLASSIFYING` labels the document with the workspace's published taxonomy
+(`api_design.md` §5 ConceptScheme, `item_model.md` "Taxonomy"): every
+classification scheme (facet) at its published version — the university
+template's domain, function, document type and audience — with the org-unit
+and program authorities read for metadata. It runs when the workspace has a
+published classification scheme; the run's `classification` narrows each
+scheme's candidates to its concepts and the concepts under them, and adds its
+note. The plan (schemes, live ConceptRules, short labels, matchers,
+fingerprint) is built once per run. Per document, after chunking, the
+deterministic steps come first and the model last:
+
+1. **Metadata by rules.** From the title and the leading text (at most 4,000
+   characters in chunk order: header, number, first heading):
+   - the number as Decree 30/2020 prints it (`Số: 123/QĐ-ĐHCNKT-ĐT`); a
+     number the model gives is kept only in that form (digits, `/`, a ký hiệu
+     starting with a capital and carrying a `-`, as `25/TB-KĐĐT` or
+     `12/2020/NĐ-CP`), never a course or form code (`DIGI330163`, `BM5`);
+   - the issue date (`TP. Hồ Chí Minh, ngày 05 tháng 8 năm 2025`) and the
+     effective date (`có hiệu lực (thi hành) (kể) từ ngày …`);
+   - the issuer: header lines matched against the org-unit labels, and the
+     number's suffix (`-ĐT`) against their alt labels;
+   - the applicability: the sentence after a scope statement (`áp dụng
+     cho/đối với …`, `phạm vi điều chỉnh/áp dụng …`, `đối tượng (áp dụng,
+     tham dự, …) …`, or `cho/đối với/dành cho (tất cả) sinh viên (toàn)
+     khoa/ngành/khóa …`; wrapped lines included, a blank line, list item,
+     heading or line ending in `:` ends it) matched against program and
+     org-unit labels, and cohorts (`K22`, `khóa 2022` → 2022). Such a
+     statement is explicit, confidence 0.95 (at or above the 0.9 search
+     ranking excludes by); a program or cohort in the title, or the model's
+     `applies_to` (which may only restate the issuer), is 0.6;
+   - superseded documents (`thay thế Quyết định số …`), resolved by document
+     number among the workspace's live documents; a number not found yet is
+     kept and resolved when a document with that number gets its profile.
+2. **Patterns.** Concepts' `matchPatterns` (the document-type scheme's
+   `QĐ`, `TB`, `KH`, `HD`… forms) are matched against the title, the number
+   and the first heading. Exactly one matching concept settles the scheme
+   (`source` RULE, the pattern as evidence). Several or none leave it to the
+   model when the scheme's `llmPolicy` is `FALLBACK`: its shortlist is the
+   matching concepts when two or more match, else any concept of the scheme.
+3. **Rules.** A ConceptRule's condition holds when its concept is settled or
+   is the extracted issuer, campus or an applicability unit or program, when
+   its collection is one of the document's ancestors, or when its source
+   registered the document. An `implies` rule settles its concept (`source`
+   RULE, confidence 1.0), and settles the scheme once the scheme's minimum
+   labels are reached (document type → function and audience). A `prior` rule
+   adds its weight to the concept as a `prior` signal; a prior on a concept
+   that cannot be assigned (a top concept) spreads to the assignable
+   published concepts under it, the weight × 0.8 per level down (issuing unit
+   → function, program → domain). A scheme whose `llmPolicy` is `NEVER` is
+   labeled by patterns and rules only.
+4. **Candidates.** Each unsettled scheme's concepts are scored from four
+   sources, each 0..1: **lexical** (Aho-Corasick over the normalized
+   preferred, alternative and hidden labels; longest non-overlapping match; a
+   title hit counts three times; frequency), **card** (cosine between the
+   embedding of the document's excerpt and the concept card's: labels,
+   definition, scope note, examples), **kNN** (the tenant's nearest indexed
+   chunks among documents with accepted labels of the scheme a person
+   reviewed, the document itself excluded, grouped by document) and
+   **prior**. The combined score keeps the top 12 as the scheme's shortlist,
+   each with its score per source.
+5. **One model call, only when a scheme is unsettled.** When every scheme in
+   scope is settled by patterns and rules, the model is not called (and the
+   document gets no summary or title suggestion). Otherwise one call to the
+   contextualization model (`BOMESH_CONTEXTUALIZATION_MODEL`, reasoning off by
+   default: `BOMESH_CONTEXTUALIZATION_REASONING_EFFORT`; contextualization
+   must be enabled) reranks the shortlists, picks the fallback schemes, fills
+   the metadata the rules did not find and writes the summary and title.
+6. **Calibration and routing.** Each chosen label gets a confidence, a
+   calibrated function of the model's certainty (`high`, `medium`, `low`),
+   the agreement between candidate sources (how many scored the concept) and
+   its rank in the shortlist; a rule or a single pattern match is 1.0. Model
+   certainty alone never auto-accepts: a label no candidate source
+   corroborates from the document itself (a lexical label hit, a card
+   similarity among the scheme's top 3, a kNN vote; a prior does not count)
+   is held 0.01 below the scheme's auto threshold, so it is at most
+   `SUGGESTED` (`evidence.corroborated` false; re-routing after a threshold
+   change keeps it there); a corroborated label may exceed it. Each
+   scheme routes by its own thresholds (`autoThreshold`, `reviewThreshold`;
+   0.9 and 0.5 when unset), chosen on a labeled set (`evaluation.md`
+   "Classification"): at or above auto → `ACCEPTED`, at or above review →
+   `SUGGESTED`, below → no label. Each scheme ends with an outcome:
+   `ASSIGNED`; `EMPTY` when the model said none with high certainty and the
+   scheme allows no label (minimum 0); `UNCERTAIN` when it said none
+   otherwise or no label reached review; `FAILED` when the model did not
+   answer.
+
+The prompt has two parts:
 
 - **The shared prefix**, identical for every document of the run: the
-  instructions, the note and the taxonomy. The taxonomy is grouped by domain
-  and sorted by name; each topic is one line with a short label (`T1..Tn`),
-  its name, description and signals. Topic IDs never reach the model. The
-  prefix is sent first with a `prompt_cache_key` derived from it
-  (OpenRouter's sticky `session_id`), so the provider serves it from its
-  prompt cache (see "Prompt caching" below). While a prefix is cold, the first
-  call writes it alone and documents processed in parallel wait for it.
-- **The document's part**: keyword matches, the title and a bounded excerpt
-  (metadata and leading chunks, ~12k characters). Keyword matches are topics
-  whose name, keywords or synonyms appear in the title, or appear twice or
-  as two different terms in the text; they are hints, not answers.
+  instructions, the note and every published scheme the model may be asked
+  (`llmPolicy` `ALWAYS` or `FALLBACK`). The instructions draw the domain
+  boundary (professional or disciplinary knowledge, a program's curriculum
+  and syllabi included; never the issuing unit; administrative documents
+  about enrolment, grading, exams, thesis or graduation procedures, fees or
+  schedules get `none`), say that a concept's scope note exclusions bind,
+  that `none` is an answer and that concepts are never invented. Each scheme is a block with its
+  cardinality (minimum..maximum, one primary) and one line per assignable
+  concept: a short label (the scheme's letter and a number, `D12`), its path
+  and name, definition, scope note, alternative labels and examples. Hidden
+  labels and concept IDs never reach the model. The prefix is sent first with
+  a `prompt_cache_key` derived from it (OpenRouter's sticky `session_id`), so
+  the provider serves it from its prompt cache (see "Prompt caching" below).
+  While a prefix is cold, the first call writes it alone and documents
+  processed in parallel wait for it.
+- **The document's part**: the settled labels as context; for each asked
+  scheme its shortlist with the per-source scores (`D12 IT › AI — lexical
+  0.82, card 0.71, knn 0.40, prior 0.60`), or "any label of" the scheme when
+  it has none; the sections when section labels are asked; the metadata
+  fields the rules did not find; the title and a bounded excerpt (metadata
+  and leading chunks, ~12k characters).
 
-The model returns every topic the document is substantially about, possibly
-several and across domains (no cap, no confidence threshold, possibly none),
-each as label, name and a short evidence phrase, plus a one- or two-sentence
-summary and a title. The title is a clean display name in the document's own
+The model answers, per asked scheme, a primary and secondary labels or
+`none`, a certainty and a short evidence quote; the sections' labels; the
+missing metadata; a one- or two-sentence summary and a title. It names
+concepts only by short labels, and only those of the scheme's shortlist and
+settled labels (any label of a scheme without a shortlist); a label outside
+that set is dropped and logged, and the model can never create a concept
+(new concepts come from people, through ConceptProposals). An unreadable
+answer, or one whose labels were all dropped while no scheme said `none`, is
+asked again once with the problem stated; the retry reuses the cached prefix.
+Each call logs its input, cached and output tokens. Model metadata fills only
+fields the rules left empty (an issuer by org-unit label). A document type
+the model picks applies its `implies` rules as in step 3. The title is a clean
+display name in the document's own
 language: the title the document states (cover, first heading, subject
 line), else its kind and subject; the file name given as the document title
 is used only for what the content confirms, without its extension or copy
 marks. A title that is missing, longer than 255 characters or empty after
 trimming quotes, end punctuation and a file extension is dropped, never
-asked again. A label whose name disagrees resolves by the name or is dropped.
-Topics outside the taxonomy are dropped. An unreadable answer, or one whose
-topics are all invalid, is asked again once with the problem stated; the
-retry reuses the cached prefix. Each call logs its input, cached and output
-tokens. The summary situates every chunk when the document has no summary of
-its own. Summary and title are stored only as an open NEW_DOCUMENT
-contribution's suggestions, which the reviewer accepts or edits in
-ApproveContribution (`title` becomes the published document's `displayName`;
-`fileName` never changes); a run never renames a document. Topics never
-enter the index payload or chunk text. TestTopicClassification runs this
-same step on a sample (`api_design.md`
-§5 Topic); CompileTopicClassificationPrompt shows both parts with
-placeholders.
+asked again. The summary situates every chunk when the document has no
+summary of its own. Summary and title are stored only as an open
+NEW_DOCUMENT contribution's suggestions, which the reviewer accepts or edits
+in ApproveContribution (`title` becomes the published document's
+`displayName`; `fileName` never changes); a run never renames a document.
+Concepts never enter the index payload or chunk text: filters, facets and
+boosts read them from PostgreSQL. TestClassification runs this same step on a
+sample, stores nothing, and returns the candidates and outcomes;
+CompileClassificationPrompt shows both parts with placeholders
+(`api_design.md` §5).
 
-When the index is recorded current (unchanged revision and governing
-collection), the chosen topics replace the document's assistant-applied
-`item_topics` rows (`created_by_user_id` NULL); rows a person applied are
-never touched, and a topic a person already applied stays theirs. Readers
-see the assistant's rows as `document.assistantTopics`;
-ConfirmTopicAssignments or a person's UpdateItem `document.topics` makes them
-a person's (the latter, when it replaces them, records a TopicCorrection).
-Classification is best effort: a provider error or an unreadable answer is
-logged, the document is indexed without classification and its topics are
-unchanged. It never changes `publicationState` and is not part of the
-processing version.
+**Section labels.** A scheme with `sectionAssignments` is also labeled per
+level-1 section (a handbook, a Q&A collection), in the same call, when no
+`implies` rule settled it and the document has at least three level-1
+sections: each section goes with its heading and first 600 characters, and
+its labels are stored with the section's Structured Document ref
+(`item_concepts.section_ref`).
+
+**Concept cards.** A card's embedding is computed with the index's
+embedding model once per published scheme version, on first use, and stored
+at `workspaces/{code}/taxonomies/{scheme}/{version}/cards-{embedding_model}.json`
+(cached in process); another embedding model writes its own file. Without an
+embedder, candidates come from labels, rules and priors only.
+
+**Writes.** When the index is recorded current (unchanged revision and
+governing collection), the results replace the document's machine rows:
+`item_concepts` (concept, primary, section, confidence, `source` RULE,
+LEXICAL, KNN or LLM, state, scheme and classifier versions, evidence),
+`item_classifications` (one outcome per scheme) and `document_profiles`
+(issuer, campus, number, dates, applicability level and cohorts, with
+`document_applicability` and `document_supersessions`). Rows a person decided
+(`source` HUMAN, or reviewed) are never touched, and a concept a person
+rejected on a document is never suggested to it again; while a scheme has a
+person's accepted labels, machine labels for it are only `SUGGESTED`. At most
+the scheme's maximum labels are `ACCEPTED` (the rest `SUGGESTED`), and a
+scheme with a primary has exactly one accepted primary, the most confident.
+Machine rows not chosen again are deleted. Profile fields a person set are
+never overwritten. Readers see `document.concepts` (REJECTED omitted),
+`document.issuance` and `document.applicability`;
+ConfirmConceptAssignments, RejectConceptAssignments or a person's UpdateItem
+`document.concepts` make the labels a person's.
+
+Classification is best effort: a provider error or a second unreadable
+answer is logged, the document is indexed, its rows are unchanged and each
+asked scheme records outcome `FAILED`. It never changes `publicationState`
+and is not part of the processing version: a taxonomy or classifier change
+never makes documents `OUTDATED`.
+
+**Classify-only runs.** A run with `classifyOnly` runs `CLASSIFYING` alone:
+it reads the stored Structured Document (parsing only a content that has none
+for the current profile) and its chunks, contextualizes and embeds nothing,
+leaves the index and `indexingState` untouched, and writes the rows above.
+Publishing a scheme (`api_design.md` §5) calls
+`services/taxonomy/reclassify.schedule_reclassification`, which queues such
+runs (`trigger` TAXONOMY, at most 1000 documents each) over exactly the documents a change needs the
+model for: a split reranks among its replacements on the documents carrying
+the deprecated concept (a person's label there gets `SUGGESTED` rows only), a
+new narrower concept reranks among its parent and the parent's children on
+the parent's documents, and a deprecation without replacement reruns the
+scheme on documents left without any label of a scheme that requires one.
+Other changes need no model: a merge remaps rows to the replacement; a
+deprecation without replacement rejects the concept's machine rows
+(`evidence.reason` `deprecated`); a threshold change re-routes machine rows by
+their stored confidence (below review → rejected, `evidence.reason`
+`below_threshold`); a ConceptRule change re-evaluates rule rows; renames,
+definition edits and moves reclassify nothing.
 
 **Classification reuse.** Every answer the model gives is stored with the
-file, `workspaces/{code}/files/{content_id}/classification-v1/{key}.json`,
-where the key is a hash of the model and its parameters, the prompt prefix
-(instructions, note, taxonomy) and the document's part (keyword matches,
-title, excerpt). Processing the same file again — *Process again*, a retry, a
-reindex — with the same taxonomy, note and model reads that answer instead of
-calling the model; any change to them asks anew. A stored answer that no
-longer reads is asked again and replaced; reuse never fails processing.
+file, `workspaces/{code}/files/{content_id}/classification-v2/{key}.json`,
+where the key is a hash of the model and its parameters, the taxonomy
+fingerprint (the schemes' published versions, the active rules and the
+classifier version), the prompt prefix (instructions, note, schemes) and the
+document's part (settled labels, shortlists, sections, metadata asks, title,
+excerpt). Processing the same file again — *Process again*, a retry, a
+reindex, a classify-only run — with the same taxonomy, rules, note and model
+reads that answer instead of calling the model; any change to them asks
+anew. A stored answer that no longer reads is asked again and replaced;
+reuse never fails processing.
 
 **Contextual retrieval text.** Every chunk keeps its canonical text; what is
 embedded and BM25-indexed is a short prefix (title, section, context) plus that

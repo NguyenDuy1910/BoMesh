@@ -17,8 +17,10 @@ test("current Studio addresses stay as they are", () => {
     "tab=documents&view=all&pub=unpublished",
     "tab=documents&view=all&quality=details",
     "tab=documents&view=processing&state=failed",
-    "tab=topics&view=suggestions",
-    "tab=topics&node=t1",
+    "tab=taxonomy",
+    "tab=taxonomy&view=suggestions",
+    "tab=taxonomy&view=domain&node=cntt",
+    "tab=taxonomy&import=1",
     "tab=collections",
     "tab=sources&view=history",
     "",
@@ -65,17 +67,14 @@ test("old Quality, Upkeep and Knowledge health addresses land on All filtered by
   assert.equal(at("tab=documents&view=quality&part=details"), "tab=documents&view=all&quality=details");
 });
 
-test("old Taxonomy, Master data and classification rules land on Topics; corrections on Suggestions", () => {
-  assert.equal(at("tab=taxonomy"), "tab=topics&view=topics");
-  assert.equal(at("tab=taxonomy&import=1"), "tab=topics&import=1&view=topics");
-  assert.equal(at("tab=taxonomy&node=t1"), "tab=topics&node=t1&view=topics");
-  assert.equal(at("tab=master"), "tab=topics&view=topics");
-  assert.equal(at("tab=flow&mode=rules"), "tab=topics&view=topics");
-  assert.equal(at("tab=flow&queue=classify"), "tab=topics&view=suggestions");
-  assert.equal(at("queue=confirm"), "tab=topics&view=suggestions");
-  assert.equal(at("tab=taxonomy&node=__learn"), "tab=topics&view=suggestions");
-  assert.equal(at("tab=taxonomy&node=__proposed"), "tab=topics&view=suggestions");
-  assert.equal(at("tab=topics&node=__proposed"), "tab=topics&view=suggestions");
+test("old Master data and classification rules land on Classification; corrections and proposals on Suggestions", () => {
+  assert.equal(at("tab=master"), "tab=taxonomy");
+  assert.equal(at("tab=master&view=rules"), "tab=taxonomy");
+  assert.equal(at("tab=flow&mode=rules"), "tab=taxonomy");
+  assert.equal(at("tab=flow&queue=classify"), "tab=taxonomy&view=suggestions");
+  assert.equal(at("queue=confirm"), "tab=taxonomy&view=suggestions");
+  assert.equal(at("tab=taxonomy&node=__learn"), "tab=taxonomy&view=suggestions");
+  assert.equal(at("tab=taxonomy&node=__proposed"), "tab=taxonomy&view=suggestions");
 });
 
 test("other old addresses land on Documents → All or Collections", () => {

@@ -8,7 +8,7 @@ import { useState } from "react";
 import { toast } from "@/components/ui/Toast";
 import { errorMessage } from "@/lib/api/client";
 
-import type { SavedSearch, Topic } from "../api";
+import type { SavedSearch } from "../api";
 import { useSavedSearchMutations } from "../queries";
 import { savedSearchParams, setKey, type BrowseParams } from "./catalog";
 import { RenameViewDialog, SaveViewDialog } from "./SaveViewDialog";
@@ -16,7 +16,6 @@ import { RenameViewDialog, SaveViewDialog } from "./SaveViewDialog";
 export interface ViewsMenuProps {
   p: BrowseParams;
   views: readonly SavedSearch[];
-  topics: readonly Topic[];
   onApply: (next: BrowseParams) => void;
   /** Suggested name and the set in words, for Save this view…. */
   suggestion: string;
@@ -27,11 +26,11 @@ export interface ViewsMenuProps {
  * Saved views (preview `MENUS['cat-views']`), the only home of saved views: open one, save this set, rename or
  * delete the one you're on (Undo). The button shows the active view's name.
  */
-export function ViewsMenu({ p, views, topics, onApply, suggestion, summary }: ViewsMenuProps) {
+export function ViewsMenu({ p, views, onApply, suggestion, summary }: ViewsMenuProps) {
   const { create, remove } = useSavedSearchMutations();
   const [dialog, setDialog] = useState<"save" | "rename" | null>(null);
   const key = setKey(p);
-  const on = views.find((v) => setKey(savedSearchParams(v, topics)) === key);
+  const on = views.find((v) => setKey(savedSearchParams(v)) === key);
   const saveable = !!(p.q || Object.values(p.filters).some((v) => v?.length));
   if (!on && !saveable && !views.length && !dialog) return null;
 
@@ -51,7 +50,7 @@ export function ViewsMenu({ p, views, topics, onApply, suggestion, summary }: Vi
     if (k === "rename") return setDialog("rename");
     if (k === "delete") return on && void del(on);
     const v = views.find((x) => x.name === k);
-    if (v) onApply(savedSearchParams(v, topics));
+    if (v) onApply(savedSearchParams(v));
   };
 
   return (

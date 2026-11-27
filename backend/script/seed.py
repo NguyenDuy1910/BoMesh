@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Seed the BoMesh workspaces, their role-matrix accounts and HCM-UTE's library structure.
+"""Seed the BoMesh workspaces, their role-matrix accounts, the university taxonomy and
+HCM-UTE's library structure.
 
 Idempotent utility (``auth_contract.md`` "Seeded workspaces and accounts"), not
 an API. It runs in two steps:
@@ -12,14 +13,30 @@ an API. It runs in two steps:
    the restricted collection and the space. Each account's direct bindings on the
    workspace, the restricted collection and the space become exactly its listed
    roles.
-2. **Library structure**, through the public API in process
-   (``httpx.ASGITransport`` over ``create_app``) as the workspace's knowledge
-   administrator: ImportTopics (MERGE) from ``topics.csv`` and ImportCollections
-   from ``collections.json`` into the shared collection. Both imports match by
-   name, so a re-run creates only what is missing.
+2. **Taxonomy and library structure**, through the public API in process
+   (``httpx.ASGITransport`` over ``create_app``):
+
+   - as the platform administrator, the platform templates of
+     ``seed_fixtures/templates/vn-university`` (function, document-type and
+     audience schemes: settings, ImportConcepts, groups) are created or
+     restored and published;
+   - as each CAMPUS workspace's knowledge administrator, the templates are
+     forked (a re-run applies the template's non-conflicting changes), the
+     workspace's own schemes from ``seed_fixtures/{fixtures}`` (domain and the
+     org-unit and program authorities) are created or restored, every scheme
+     is published, the template's and the workspace's ``rules.csv`` become
+     ConceptRules, the seeded students' affiliations are imported
+     (ImportMemberAffiliations) and ``collections.json`` is imported into the
+     shared collection (ImportCollections).
+
+   Imports MERGE by notation, name or code, so a re-run creates only what is
+   missing and restores what the fixtures define; a publish without changes is
+   skipped.
 
 Every re-run restores the matrix: names and passwords are reset to the seed
 password, extra roles on the seeded resources are removed and missing ones granted.
+New workspaces created through the API fork nothing: their administrator forks
+the templates they want (CreateConceptScheme ``template``).
 """
 
 from __future__ import annotations
@@ -70,6 +87,10 @@ from bomesh.services.knowledge_items.item_store import (  # noqa: E402
     ItemService,
     ensure_personal_collection,
 )
+from bomesh.services.taxonomy.classification import (  # noqa: E402
+    DEFAULT_AUTO_THRESHOLD,
+    DEFAULT_REVIEW_THRESHOLD,
+)
 
 DEFAULT_PASSWORD = "19102003"
 FIXTURES = Path(__file__).resolve().parent / "seed_fixtures"
@@ -107,6 +128,106 @@ class SeedSpace:
 
 
 @dataclass(frozen=True, slots=True)
+class SeedScheme:
+    """A concept scheme and its settings (``item_model.md`` §4.13). Its
+    concepts are ``{code}.csv`` (ImportConcepts columns) and its groups, when
+    present, ``{code}-groups.csv`` (code, name, position, queryExpansion, members)
+    in the fixture directory."""
+
+    code: str
+    name: str
+    description: str
+    position: int
+    classification: bool = True
+    min_labels: int = 0
+    max_labels: int | None = None
+    has_primary: bool = False
+    max_depth: int = 1
+    assign_top_concepts: bool = True
+    section_assignments: bool = False
+    llm_policy: str = "NEVER"
+
+    def settings(self) -> dict[str, Any]:
+        """The CreateConceptScheme/UpdateConceptScheme body; classification schemes
+        start at the classifier's default thresholds, authorities have none."""
+        return {
+            "displayName": self.name,
+            "description": self.description,
+            "position": self.position,
+            "cardinality": {"min": self.min_labels, "max": self.max_labels, "primary": self.has_primary},
+            "maxDepth": self.max_depth,
+            "assignTopConcepts": self.assign_top_concepts,
+            "sectionAssignments": self.section_assignments,
+            "llmPolicy": self.llm_policy,
+            "autoThreshold": DEFAULT_AUTO_THRESHOLD if self.classification else None,
+            "reviewThreshold": DEFAULT_REVIEW_THRESHOLD if self.classification else None,
+        }
+
+
+#: The platform templates of a Vietnamese university (``seed_fixtures/templates/vn-university``).
+TEMPLATE_FIXTURES = FIXTURES / "templates" / "vn-university"
+TEMPLATE_SCHEMES: tuple[SeedScheme, ...] = (
+    SeedScheme(
+        "function",
+        "Nghiệp vụ",
+        "Hoạt động của nhà trường mà tài liệu phục vụ: tuyển sinh, đào tạo, công tác sinh viên, "
+        "khoa học công nghệ, tổ chức và hành chính.",
+        position=2,
+        min_labels=1,
+        max_labels=2,
+        max_depth=2,
+        assign_top_concepts=False,
+        section_assignments=True,
+        llm_policy="ALWAYS",
+    ),
+    SeedScheme(
+        "document-type",
+        "Loại tài liệu",
+        "Hình thức của tài liệu: quy chế, quyết định, thông báo, giáo trình, khóa luận…",
+        position=3,
+        min_labels=1,
+        max_labels=1,
+        llm_policy="FALLBACK",
+    ),
+    SeedScheme(
+        "audience",
+        "Đối tượng",
+        "Người đọc mà tài liệu hướng tới.",
+        position=4,
+        llm_policy="FALLBACK",
+    ),
+)
+#: HCM-UTE's own schemes (``seed_fixtures/hcmute``).
+DOMAIN = SeedScheme(
+    "domain",
+    "Lĩnh vực",
+    "Kiến thức chuyên môn mà tài liệu đề cập: ngành, môn học, chủ đề nghiên cứu.",
+    position=1,
+    max_labels=3,
+    has_primary=True,
+    max_depth=3,
+    assign_top_concepts=False,
+    llm_policy="ALWAYS",
+)
+ORG_UNIT = SeedScheme(
+    "org-unit",
+    "Đơn vị",
+    "Khoa, viện, phòng, trung tâm và phân hiệu: đơn vị ban hành, phạm vi áp dụng của văn bản "
+    "và đơn vị của thành viên.",
+    position=5,
+    classification=False,
+    max_depth=2,
+)
+PROGRAM = SeedScheme(
+    "program",
+    "Ngành đào tạo",
+    "Ngành đào tạo theo mã Bộ GD&ĐT: phạm vi áp dụng của văn bản và ngành của sinh viên.",
+    position=6,
+    classification=False,
+)
+
+
+@dataclass(frozen=True, slots=True)
 class SeedWorkspace:
     """One organization: ``code`` is its web address (``api_design.md`` Workspace)."""
 
@@ -117,8 +238,11 @@ class SeedWorkspace:
     shared_collection: SeedCollection | None = None
     restricted_collection: SeedCollection | None = None
     space: SeedSpace | None = None
-    #: ``seed_fixtures/{fixtures}/topics.csv`` and ``collections.json``, when present.
+    #: ``seed_fixtures/{fixtures}/``: ``{scheme}.csv`` of ``schemes``, ``rules.csv``
+    #: and ``collections.json``, when present.
     fixtures: str | None = None
+    #: The workspace's own schemes; a CAMPUS workspace also forks ``TEMPLATE_SCHEMES``.
+    schemes: tuple[SeedScheme, ...] = ()
     template: str = "campus"
 
 
@@ -143,6 +267,7 @@ HCMUTE = SeedWorkspace(
         "Thông báo, tài liệu môn học và yêu cầu gửi văn phòng Khoa Công nghệ Thông tin.",
     ),
     fixtures="hcmute",
+    schemes=(DOMAIN, ORG_UNIT, PROGRAM),
 )
 FTU_HCMC = SeedWorkspace(
     code="ftu-hcmc",
@@ -164,6 +289,8 @@ class Membership:
     workspace_roles: tuple[str, ...] = (WORKSPACE_MEMBER,)
     collection_roles: tuple[str, ...] = ()
     space_roles: tuple[str, ...] = ()
+    #: A student's registrar row (ImportMemberAffiliations): program notation and cohort.
+    affiliation: tuple[str, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,8 +350,13 @@ def _system(
     )
 
 
-def _ute(*roles: str, collection: tuple[str, ...] = (), space: tuple[str, ...] = ()) -> Membership:
-    return Membership("hcmute", roles or (WORKSPACE_MEMBER,), collection, space)
+def _ute(
+    *roles: str,
+    collection: tuple[str, ...] = (),
+    space: tuple[str, ...] = (),
+    affiliation: tuple[str, int] | None = None,
+) -> Membership:
+    return Membership("hcmute", roles or (WORKSPACE_MEMBER,), collection, space, affiliation)
 
 
 def _ftu(*roles: str) -> Membership:
@@ -269,14 +401,14 @@ ACCOUNTS: tuple[SeedAccount, ...] = (
     _system(
         "hcmute.curator",
         "HCM-UTE · Quản trị tri thức",
-        "workspaceAdmin · tạo kho, chủ đề và space được seed",
+        "workspaceAdmin · tạo kho, phân loại và space được seed",
         memberships=(_ute(WORKSPACE_ADMIN),),
     ),
     _system(
         "hcmute.member",
         "HCM-UTE · Thành viên",
-        "workspaceMember",
-        memberships=(_ute(),),
+        "workspaceMember · sinh viên ngành Công nghệ thông tin, khóa 2022",
+        memberships=(_ute(affiliation=("p-7480201", 2022)),),
     ),
     _system(
         "hcmute.collection-owner",
@@ -331,7 +463,7 @@ ACCOUNTS: tuple[SeedAccount, ...] = (
     _system(
         "ftu-hcmc.curator",
         "FTU TP. HCM · Quản trị tri thức",
-        "workspaceAdmin · quản lý kho và chủ đề",
+        "workspaceAdmin · quản lý kho và phân loại",
         memberships=(_ftu(WORKSPACE_ADMIN),),
     ),
     _system(
@@ -570,31 +702,105 @@ async def seed_identity(*, password: str) -> _Seeded:
     return seeded
 
 
-# -- Step 2: library structure through the API -------------------------------------
+# -- Step 2: taxonomy and library structure through the API ------------------------
+
+#: Username of the platform administrator who creates the platform templates.
+TEMPLATE_CURATOR = "platform.admin"
+#: ImportConcepts columns (``ConceptImportRow``).
+CONCEPT_COLUMNS = (
+    "notation",
+    "broader",
+    "related",
+    "prefVi",
+    "prefEn",
+    "altVi",
+    "altEn",
+    "hidden",
+    "definition",
+    "scopeNote",
+    "examples",
+    "color",
+    "icon",
+    "matchPatterns",
+    "timeSensitive",
+    "mappings",
+)
+#: Fixture columns that become mappings: (column, target system, default match).
+#: A program's faculty and domain are mappings because ``broader`` never crosses schemes.
+MAPPING_COLUMNS = (("faculty", "org-unit", "broad"), ("domainMatch", "domain", "close"))
 
 
-def _topic_rows(path: Path) -> list[dict[str, Any]]:
-    """``topics.csv`` (domain, topic, description, keywords, synonyms, guidance) as
-    ImportTopics rows; list cells are ``;``-separated."""
-
-    def listed(value: str) -> list[str]:
-        return [part.strip() for part in value.split(";") if part.strip()]
-
-    rows: list[dict[str, Any]] = []
+def _csv(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8-sig", newline="") as handle:
-        for record in csv.DictReader(handle):
-            row: dict[str, Any] = {"domain": record["domain"].strip()}
-            if record.get("topic", "").strip():
-                row["topic"] = record["topic"].strip()
-            if record.get("description", "").strip():
-                row["description"] = record["description"].strip()
-            for column in ("keywords", "synonyms"):
-                if record.get(column, "").strip():
-                    row[column] = listed(record[column])
-            if record.get("guidance", "").strip():
-                row["guidance"] = record["guidance"].strip()
-            rows.append(row)
+        return [{key: (value or "").strip() for key, value in record.items()} for record in csv.DictReader(handle)]
+
+
+def _split(value: str) -> list[str]:
+    return [part.strip() for part in value.split("|") if part.strip()]
+
+
+def _concept_rows(path: Path) -> list[dict[str, str]]:
+    """``{scheme}.csv`` as ImportConcepts rows; ``faculty`` (``org-unit:<notation>``)
+    and ``domainMatch`` (``domain:<notation>[:match]``) cells join ``mappings`` as
+    ``org-unit:<notation>:broad`` and ``domain:<notation>:close``."""
+    rows: list[dict[str, str]] = []
+    for line, record in enumerate(_csv(path), start=2):
+        row = {column: record[column] for column in CONCEPT_COLUMNS if column in record}
+        mappings = _split(row.get("mappings", ""))
+        for column, system, match in MAPPING_COLUMNS:
+            for value in _split(record.get(column, "")):
+                parts = value.split(":")
+                if parts[0] != system or len(parts) not in (2, 3) or not parts[1]:
+                    raise SystemExit(f"{path}:{line}: {column} '{value}' is not {system}:<notation>[:match].")
+                mappings.append(":".join((system, parts[1], parts[2] if len(parts) == 3 else match)))
+        if "mappings" in row or mappings:
+            row["mappings"] = "|".join(mappings)
+        rows.append(row)
     return rows
+
+
+def _concept_name(scheme: str, notation: str) -> str:
+    return f"{scheme}/concepts/{notation}"
+
+
+def _group_bodies(path: Path, scheme: str) -> list[tuple[str, dict[str, Any]]]:
+    """``{scheme}-groups.csv`` as (groupId, CreateConceptGroup body); members are notations."""
+    return [
+        (
+            record["code"],
+            {
+                "displayName": record["name"],
+                "position": int(record["position"]),
+                "members": [_concept_name(scheme, notation) for notation in _split(record["members"])],
+                "queryExpansion": record["queryExpansion"].lower() == "true",
+            },
+        )
+        for record in _csv(path)
+    ]
+
+
+def _rule_bodies(path: Path, workspace: str) -> list[tuple[str, dict[str, Any]]]:
+    """``rules.csv`` (code, when, then, effect, weight; concepts as ``scheme:notation``)
+    as (conceptRuleId, CreateConceptRule body)."""
+
+    def concept(value: str, line: int) -> str:
+        scheme, _, notation = value.partition(":")
+        if not scheme or not notation:
+            raise SystemExit(f"{path}:{line}: '{value}' is not scheme:notation.")
+        return _concept_name(f"{workspace}/conceptSchemes/{scheme}", notation)
+
+    return [
+        (
+            record["code"],
+            {
+                "when": {"concept": concept(record["when"], line)},
+                "then": concept(record["then"], line),
+                "effect": record["effect"].upper(),
+                "weight": float(record["weight"]) if record["weight"] else None,
+            },
+        )
+        for line, record in enumerate(_csv(path), start=2)
+    ]
 
 
 def _collection_rows(path: Path) -> list[dict[str, Any]]:
@@ -612,52 +818,214 @@ def _collection_rows(path: Path) -> list[dict[str, Any]]:
     return list(walk(json.loads(path.read_text(encoding="utf-8"))["folders"], ()))
 
 
-async def _call(http: httpx.AsyncClient, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
-    response = await http.request(method, url, **kwargs)
+def _flat(message: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """A message's fields by update-mask path (``cardinality.max``)."""
+    flat: dict[str, Any] = {}
+    for key, value in message.items():
+        if isinstance(value, dict):
+            flat.update(_flat(value, f"{prefix}{key}."))
+        else:
+            flat[f"{prefix}{key}"] = value
+    return flat
+
+
+class _Api:
+    """The in-process API as one signed-in account; paths are resource names."""
+
+    def __init__(self, http: httpx.AsyncClient, token: str) -> None:
+        self._http = http
+        self._headers = {"Authorization": f"Bearer {token}"}
+
+    @classmethod
+    async def sign_in(cls, http: httpx.AsyncClient, username: str, password: str) -> _Api:
+        email = next(account.email for account in ACCOUNTS if account.username == username)
+        response = await http.post(
+            "/api/v1/sessions", json={"credential": {"password": {"email": email, "password": password}}}
+        )
+        _raise_for(response)
+        return cls(http, response.json()["accessToken"])
+
+    async def send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        return await self._http.request(method, f"/api/v1/{path}", headers=self._headers, **kwargs)
+
+    async def call(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        response = await self.send(method, path, **kwargs)
+        _raise_for(response)
+        return response.json() if response.content else {}
+
+    async def find(self, path: str) -> dict[str, Any] | None:
+        """GET ``path``; None when it does not exist."""
+        response = await self.send("GET", path)
+        if response.status_code == 404:
+            return None
+        _raise_for(response)
+        return response.json()
+
+
+def _raise_for(response: httpx.Response) -> None:
     if response.status_code >= 400:
-        raise RuntimeError(f"{method} {url} → {response.status_code}: {response.text[:500]}")
-    return response.json() if response.content else {}
+        request = response.request
+        raise RuntimeError(f"{request.method} {request.url.path} → {response.status_code}: {response.text[:2000]}")
+
+
+def _schemes(parent: str) -> str:
+    """The scheme collection under ``parent`` (``""``: the platform templates)."""
+    return f"{parent}/conceptSchemes" if parent else "conceptSchemes"
+
+
+async def _seed_scheme(api: _Api, parent: str, seed: SeedScheme, directory: Path) -> str:
+    """Create ``seed`` under ``parent`` or restore its settings, then ImportConcepts
+    and the groups from ``directory``."""
+    schemes = _schemes(parent)
+    scheme = f"{schemes}/{seed.code}"
+    settings = seed.settings()
+    current = await api.find(scheme)
+    if current is None:
+        purpose = "CLASSIFICATION" if seed.classification else "AUTHORITY"
+        await api.call(
+            "POST", schemes, params={"conceptSchemeId": seed.code}, json={"purpose": purpose, **settings}
+        )
+    else:
+        held = _flat(current)
+        changed = [path for path, value in _flat(settings).items() if held.get(path) != value]
+        if changed:
+            await api.call("PATCH", scheme, params={"updateMask": ",".join(changed)}, json=settings)
+    result = await api.call(
+        "POST", f"{scheme}:importConcepts", json={"rows": _concept_rows(directory / f"{seed.code}.csv")}
+    )
+    groups = directory / f"{seed.code}-groups.csv"
+    if groups.exists():
+        for code, body in _group_bodies(groups, scheme):
+            held_group = await api.find(f"{scheme}/groups/{code}")
+            if held_group is None:
+                await api.call("POST", f"{scheme}/groups", params={"groupId": code}, json=body)
+            elif any(held_group.get(key) != value for key, value in body.items()):
+                await api.call(
+                    "PATCH", f"{scheme}/groups/{code}", params={"updateMask": ",".join(body)}, json=body
+                )
+    return (
+        f"{seed.code} (concepts created {len(result.get('created', []))}, "
+        f"updated {len(result.get('updated', []))}, unchanged {result.get('unchangedCount', 0)})"
+    )
+
+
+async def _fork(api: _Api, parent: str, template: SeedScheme) -> str:
+    """Fork the platform template, or take its non-conflicting changes since the
+    fork's template version (conflicting ones keep the fork's own edits)."""
+    schemes = _schemes(parent)
+    scheme = f"{schemes}/{template.code}"
+    current = await api.find(scheme)
+    if current is None:
+        await api.call(
+            "POST",
+            schemes,
+            params={"conceptSchemeId": template.code},
+            json={"template": f"{_schemes('')}/{template.code}"},
+        )
+        return f"{template.code} (forked)"
+    diff = await api.call("GET", f"{scheme}:diffTemplate")
+    keys = [change["key"] for change in diff.get("changes", []) if not change.get("conflict")]
+    if not keys:
+        return f"{template.code} (fork up to date)"
+    await api.call("POST", f"{scheme}:applyTemplateChanges", json={"changes": keys, "etag": current.get("etag")})
+    return f"{template.code} (took {len(keys)} template changes)"
+
+
+async def _publish(api: _Api, parent: str, code: str) -> str:
+    """Publish the scheme's working copy: ``code vN``, or ``code unchanged``."""
+    response = await api.send("POST", f"{_schemes(parent)}/{code}:publish", json={})
+    if response.status_code >= 400 and "NO_CHANGES" in response.text:
+        return f"{code} unchanged"
+    _raise_for(response)
+    operation = response.json()
+    if operation.get("error"):
+        raise RuntimeError(f"Publishing {code} failed: {operation['error']}")
+    return f"{code} v{operation['response']['name'].rsplit('/', 1)[-1]}"
+
+
+async def _seed_rules(api: _Api, workspace: str, path: Path) -> tuple[int, int, int]:
+    """``rules.csv`` as ConceptRules: (created, updated, unchanged)."""
+    created = updated = unchanged = 0
+    for code, body in _rule_bodies(path, workspace):
+        rule = f"{workspace}/conceptRules/{code}"
+        current = await api.find(rule)
+        if current is None:
+            await api.call("POST", f"{workspace}/conceptRules", params={"conceptRuleId": code}, json=body)
+            created += 1
+            continue
+        held = (current.get("when", {}).get("concept"), current.get("then"), current.get("effect"))
+        if (*held, current.get("weight")) == (body["when"]["concept"], body["then"], body["effect"], body["weight"]):
+            unchanged += 1
+            continue
+        await api.call("PATCH", rule, params={"updateMask": "when,then,effect,weight"}, json=body)
+        updated += 1
+    return created, updated, unchanged
+
+
+async def _seed_workspace(api: _Api, seeded: _Seeded, ws: SeedWorkspace) -> str:
+    """A workspace's taxonomy (forks, own schemes, publish, rules), affiliations and folders."""
+    workspace = f"workspaces/{seeded.workspaces[ws.code]}"
+    fixtures = FIXTURES / ws.fixtures if ws.fixtures else None
+    templates = TEMPLATE_SCHEMES if ws.template == "campus" else ()
+    if ws.schemes and fixtures is None:
+        raise SystemExit(f"{ws.code}: schemes need a fixtures directory.")
+    parts: list[str] = []
+
+    seeded_schemes = [await _fork(api, workspace, template) for template in templates]
+    if fixtures is not None:
+        seeded_schemes += [await _seed_scheme(api, workspace, scheme, fixtures) for scheme in ws.schemes]
+    if seeded_schemes:
+        parts.append("schemes " + "; ".join(seeded_schemes))
+        ordered = sorted((*templates, *ws.schemes), key=lambda scheme: scheme.position)
+        parts.append("published " + ", ".join([await _publish(api, workspace, s.code) for s in ordered]))
+
+    rule_files = [TEMPLATE_FIXTURES / "rules.csv"] if templates else []
+    if fixtures is not None and (fixtures / "rules.csv").exists():
+        rule_files.append(fixtures / "rules.csv")
+    if rule_files:
+        counts = [await _seed_rules(api, workspace, path) for path in rule_files]
+        created, updated, unchanged = (sum(column) for column in zip(*counts, strict=True))
+        parts.append(f"rules (created {created}, updated {updated}, unchanged {unchanged})")
+
+    rows = [
+        {"email": account.email, "program": membership.affiliation[0], "cohort": membership.affiliation[1]}
+        for account in ACCOUNTS
+        for membership in account.memberships
+        if membership.workspace == ws.code and membership.affiliation is not None
+    ]
+    if rows:
+        result = await api.call("POST", f"{workspace}/members:importAffiliations", json={"rows": rows})
+        parts.append(
+            f"affiliations {len(result.get('members', []))} "
+            f"(skipped {len(result.get('skippedMembers', []))} edited by an admin)"
+        )
+
+    shared = seeded.shared_collections.get(ws.code)
+    if fixtures is not None and shared is not None and (fixtures / "collections.json").exists():
+        folders = await api.call(
+            "POST",
+            f"{workspace}/items/{shared}:importCollections",
+            json={"rows": _collection_rows(fixtures / "collections.json")},
+        )
+        name = ws.shared_collection.name if ws.shared_collection else ""
+        parts.append(f"folders of '{name}' {_summary(folders)}")
+    return f"{ws.code}: " + " · ".join(parts)
 
 
 async def seed_structure(seeded: _Seeded, *, password: str) -> list[str]:
-    """ImportTopics and ImportCollections from each workspace's fixtures."""
+    """The platform templates, then each workspace's taxonomy, affiliations and folders."""
     lines: list[str] = []
     runtime = AppRuntime()
     try:
         transport = httpx.ASGITransport(app=create_app(runtime))
-        async with httpx.AsyncClient(transport=transport, base_url="http://seed") as http:
+        async with httpx.AsyncClient(transport=transport, base_url="http://seed", timeout=None) as http:
+            platform = await _Api.sign_in(http, TEMPLATE_CURATOR, password)
+            templates = [await _seed_scheme(platform, "", scheme, TEMPLATE_FIXTURES) for scheme in TEMPLATE_SCHEMES]
+            published = [await _publish(platform, "", scheme.code) for scheme in TEMPLATE_SCHEMES]
+            lines.append(f"templates: {'; '.join(templates)} · published {', '.join(published)}")
             for ws in WORKSPACES:
-                if ws.fixtures is None:
-                    continue
-                curator = next(a for a in ACCOUNTS if a.username == ws.curator)
-                session = await _call(
-                    http,
-                    "POST",
-                    "/api/v1/sessions",
-                    json={"credential": {"password": {"email": curator.email, "password": password}}},
-                )
-                http.headers["Authorization"] = f"Bearer {session['accessToken']}"
-                workspace = f"/api/v1/workspaces/{seeded.workspaces[ws.code]}"
-                fixtures = FIXTURES / ws.fixtures
-                topics = await _call(
-                    http,
-                    "POST",
-                    f"{workspace}/topics:import",
-                    json={"rows": _topic_rows(fixtures / "topics.csv"), "mode": "MERGE"},
-                )
-                shared = seeded.shared_collections[ws.code]
-                folders = await _call(
-                    http,
-                    "POST",
-                    f"{workspace}/items/{shared}:importCollections",
-                    json={"rows": _collection_rows(fixtures / "collections.json")},
-                )
-                lines.append(
-                    f"{ws.code}: topics {_summary(topics)} · folders of "
-                    f"'{ws.shared_collection.name if ws.shared_collection else ''}' "
-                    f"{_summary(folders)}"
-                )
-                http.headers.pop("Authorization")
+                api = await _Api.sign_in(http, ws.curator, password)
+                lines.append(await _seed_workspace(api, seeded, ws))
     finally:
         await runtime.aclose()
     return lines

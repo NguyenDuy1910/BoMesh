@@ -90,10 +90,10 @@ const kbd = k => `<kbd class="kbd">${esc(k)}</kbd>`;
 /** Category tones (tokens.css `--tone-*`): identity colors for kinds (permission groups, roles), never for status. */
 const CATEGORY_TONES = ['blue', 'violet', 'teal', 'amber', 'pink', 'green'];
 const categoryTone = key => CATEGORY_TONES[hashOf(String(key)) % CATEGORY_TONES.length];
-/** A stable color for one of many kinds (topic domains): a hue hashed from `key`, skipping the red band status owns, at the
+/** A stable color for one of many kinds (top concepts): a hue hashed from `key`, skipping the red band status owns, at the
     lightness and chroma of the category tones. Six tones are too few for dozens of domains; this keeps neighbours apart. */
 const categoryColor = key => `oklch(63% 0.15 ${45 + (hashOf(String(key)) % 300)})`;
-/** The colors people give topic domains (Topic.color, lowercase #rrggbb): twelve hues apart, mid-tone so their soft tiles and
+/** The colors people give top concepts (concept.color, lowercase #rrggbb): twelve hues apart, mid-tone so their soft tiles and
     tags read in light and dark, no status red. The web's `DOMAIN_COLORS` (src/lib/tones.ts) is the same list. */
 const DOMAIN_COLORS = [['#2f6fb5', 'Blue'], ['#0e7c66', 'Emerald'], ['#c2620f', 'Orange'], ['#6b4fbf', 'Violet'], ['#b4467a', 'Pink'], ['#1f7a8c', 'Cyan'],
   ['#4e6b2e', 'Olive'], ['#a8790e', 'Amber'], ['#4c51bf', 'Indigo'], ['#9c3fa8', 'Plum'], ['#8a5a3c', 'Brown'], ['#4f5865', 'Slate']];

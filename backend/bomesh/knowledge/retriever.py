@@ -11,12 +11,25 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Sequence
+import math
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from uuid import UUID
 
 from bomesh.document_index import ContextualChunk, ItemContentIndex
 from bomesh.document_structure import CitationTarget
-from bomesh.knowledge import DocumentFacts, Evidence, ReadAccess, Reranker, RetrievalContext
+from bomesh.knowledge import (
+    DocumentFacts,
+    Evidence,
+    RankedList,
+    ReadAccess,
+    ReadScope,
+    Reranker,
+    Retrieval,
+    RetrievalContext,
+    SearchRanking,
+)
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +43,7 @@ class ItemKnowledgeRetriever:
         *,
         access: ReadAccess,
         reranker: Reranker | None = None,
+        ranking: SearchRanking | None = None,
         candidate_count: int = 20,
         reranking_enabled: bool = False,
         rerank_timeout_seconds: float = 8.0,
@@ -41,6 +55,7 @@ class ItemKnowledgeRetriever:
         self._index = index
         self._access = access
         self._reranker = reranker
+        self._ranking = ranking
         self._candidate_count = candidate_count
         self._reranking_enabled = reranking_enabled
         # Shorter than the tool budget, so a slow reranker falls back to the
@@ -53,30 +68,157 @@ class ItemKnowledgeRetriever:
         *,
         limit: int,
         ctx: RetrievalContext,
+        context_chunks: int = 0,
     ) -> list[Evidence]:
+        retrieval = await self.search_interpreted(
+            queries, limit=limit, ctx=ctx, context_chunks=context_chunks
+        )
+        return retrieval.evidence
+
+    async def search_interpreted(
+        self,
+        queries: Sequence[str],
+        *,
+        limit: int,
+        ctx: RetrievalContext,
+        context_chunks: int = 0,
+    ) -> Retrieval:
+        """The search with the taxonomy ranking (``conversation_loop.md`` "Knowledge retrieval"; ``api_design.md`` SearchItems), when set:
+        recall passes narrowed to the documents each reading's concepts match, fused with
+        the plain pass and boosted; an ambiguous query's evidence comes in one group per
+        reading, each group an equal share of ``limit``."""
         normalized_queries = _validate_search(queries, limit=limit)
+        if context_chunks < 0:
+            raise ValueError("context_chunks must not be negative")
         tenant_id = _validate_tenant_id(ctx.tenant_id)
         if not ctx.collection_item_ids and not ctx.document_item_ids:
-            return []
+            return Retrieval(evidence=[])
         scope = await self._access.scope(ctx)
         if not scope.readable and not scope.documents:
-            return []
-        chunks = await self._index.search_item_content(
-            normalized_queries,
-            limit=max(limit, self._candidate_count),
+            return Retrieval(evidence=[])
+        plan = (
+            await self._ranking.plan(ctx, normalized_queries, scope)
+            if self._ranking is not None
+            else None
+        )
+        interpretations = plan.interpretations if plan is not None else ()
+        candidates_limit = max(limit, self._candidate_count)
+        chunks = await self._candidates(normalized_queries, tenant_id, scope, candidates_limit)
+        if plan is None:
+            lists = [RankedList(chunks=chunks)] if chunks else []
+        else:
+            passes = await asyncio.gather(
+                *(
+                    self._candidates(
+                        [recall.query], tenant_id, scope, candidates_limit, within=recall.item_ids
+                    )
+                    for recall in plan.recalls
+                )
+            )
+            lists = await plan.order(
+                chunks,
+                {recall.key: found for recall, found in zip(plan.recalls, passes, strict=True)},
+            )
+        candidates = [chunk for ranked in lists for chunk in ranked.chunks]
+        if not candidates:
+            return Retrieval(evidence=[], interpretations=interpretations)
+        facts = await scope.recheck([chunk.item_id for chunk in candidates])
+        ranked, groups = await self._final(lists, facts, normalized_queries, limit)
+        evidence = [
+            replace(_evidence_from_chunk(chunk, facts[chunk.item_id]), group=group)
+            for chunk, group in zip(ranked, groups, strict=True)
+        ]
+        if context_chunks and ranked:
+            evidence = await self._with_context(
+                ranked, evidence, facts, tenant_id=tenant_id, count=context_chunks
+            )
+        return Retrieval(evidence=evidence, interpretations=interpretations)
+
+    async def _candidates(
+        self,
+        queries: Sequence[str],
+        tenant_id: str,
+        scope: ReadScope,
+        limit: int,
+        *,
+        within: tuple[str, ...] | None = None,
+    ) -> list[ContextualChunk]:
+        return await self._index.search_item_content(
+            queries,
+            limit=limit,
             tenant_id=tenant_id,
             collection_item_ids=scope.readable,
             editable_collection_ids=scope.editable,
             document_item_ids=scope.documents,
+            within_item_ids=within,
         )
-        if not chunks:
-            return []
-        facts = await scope.recheck([chunk.item_id for chunk in chunks])
-        allowed = [chunk for chunk in chunks if chunk.item_id in facts]
-        if not allowed:
-            return []
-        ranked = await self._rank(allowed, queries=normalized_queries, limit=limit)
-        return [_evidence_from_chunk(chunk, facts[chunk.item_id]) for chunk in ranked]
+
+    async def _final(
+        self,
+        lists: Sequence[RankedList],
+        facts: Mapping[str, DocumentFacts],
+        queries: list[str],
+        limit: int,
+    ) -> tuple[list[ContextualChunk], list[str | None]]:
+        """The matches shown and their groups: the reranked single list, or an equal
+        share of ``limit`` per group (each chunk once, in its first group)."""
+        allowed = [
+            [chunk for chunk in ranked.chunks if chunk.item_id in facts] for ranked in lists
+        ]
+        if len(lists) == 1 and lists[0].group is None:
+            chosen = await self._rank(allowed[0], queries=queries, limit=limit) if allowed[0] else []
+            return chosen, [None] * len(chosen)
+        share = max(1, math.ceil(limit / max(len(lists), 1)))
+        chunks: list[ContextualChunk] = []
+        groups: list[str | None] = []
+        taken: set[str] = set()
+        for ranked, kept in zip(lists, allowed, strict=True):
+            fresh = [chunk for chunk in kept if chunk.id not in taken][:share]
+            taken.update(chunk.id for chunk in fresh)
+            chunks.extend(fresh)
+            groups.extend([ranked.group] * len(fresh))
+        return chunks, groups
+
+    async def _with_context(
+        self,
+        ranked: list[ContextualChunk],
+        evidence: list[Evidence],
+        facts: Mapping[str, DocumentFacts],
+        *,
+        tenant_id: str,
+        count: int,
+    ) -> list[Evidence]:
+        """Each match with ``count`` neighbours a side (on a sheet, the rest of its row), in one index read.
+
+        The matches' documents were re-checked just now, so their neighbours widen nothing. A
+        failed read leaves the matches alone: context helps, it is not the evidence.
+        """
+
+        wanted: dict[str, set[int]] = defaultdict(set)
+        for chunk in ranked:
+            reach = _ROW_PARTS if _on_sheet(chunk) else count
+            wanted[chunk.item_id].update(range(max(0, chunk.chunk_index - reach), chunk.chunk_index + reach + 1))
+        try:
+            found = await self._index.get_item_chunks(tenant_id=tenant_id, chunks=wanted)
+        except Exception as exc:  # noqa: BLE001 - context is best effort
+            log.warning("retrieval context unavailable; matches only: %s", type(exc).__name__)
+            return evidence
+        at = {(chunk.item_id, chunk.chunk_index): chunk for chunk in found}
+        taken = {(chunk.item_id, chunk.chunk_index) for chunk in ranked}
+        output: list[Evidence] = []
+        for chunk, item in zip(ranked, evidence, strict=True):
+            before = _neighbours(chunk, at, taken, step=-1, count=count)
+            after = _neighbours(chunk, at, taken, step=1, count=count)
+            taken.update((part.item_id, part.chunk_index) for part in (*before, *after))
+            document = facts[chunk.item_id]
+            output.append(
+                replace(
+                    item,
+                    context_before=tuple(_evidence_from_chunk(part, document) for part in reversed(before)),
+                    context_after=tuple(_evidence_from_chunk(part, document) for part in after),
+                )
+            )
+        return output
 
     async def _rank(
         self,
@@ -114,6 +256,51 @@ class ItemKnowledgeRetriever:
                 f": {reason}" if reason else "",
             )
             return _score_order(chunks, limit=limit)
+
+
+#: Parts of one table row (chunks with the same sheet highlight) a match on a
+#: sheet brings, a side, instead of ``context_chunks``: a long row is cut into
+#: parts, and only its first part says whom the row is about.
+_ROW_PARTS = 8
+
+
+def _on_sheet(chunk: ContextualChunk) -> bool:
+    return any(highlight.sheet for highlight in chunk.highlights)
+
+
+def _neighbours(
+    match: ContextualChunk,
+    at: Mapping[tuple[str, int], ContextualChunk],
+    taken: set[tuple[str, int]],
+    *,
+    step: int,
+    count: int,
+) -> list[ContextualChunk]:
+    """The chunks next to ``match`` going ``step`` (-1 before, 1 after), nearest first.
+
+    A neighbour is the same indexed revision under the same heading or sheet
+    (``location``), not another match and not one an earlier match took. On a
+    sheet it is only another part of the match's own row: every row line names
+    its columns, so the next row is another record, not context.
+    """
+
+    found: list[ContextualChunk] = []
+    sheet = _on_sheet(match)
+    index = match.chunk_index + step
+    while (chunk := at.get((match.item_id, index))) is not None and (match.item_id, index) not in taken:
+        if (chunk.revision_number, chunk.structure_version, chunk.location) != (
+            match.revision_number,
+            match.structure_version,
+            match.location,
+        ):
+            break
+        if sheet and (chunk.highlights != match.highlights or len(found) == _ROW_PARTS):
+            break
+        if not sheet and len(found) == count:
+            break
+        found.append(chunk)
+        index += step
+    return found
 
 
 def _score_order(chunks: list[ContextualChunk], *, limit: int) -> list[ContextualChunk]:

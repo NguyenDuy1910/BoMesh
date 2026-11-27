@@ -10,15 +10,17 @@ import { startTour } from "@/components/shell/overlays";
 import { IconButton, LinkButton, ProgressBar, toast } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { plural, rel } from "@/lib/format";
+import { categoryColor } from "@/lib/tones";
 import { DocThumb, ResourceCard } from "@/modules/knowledge/components/ResourceCard";
 import { ResDot } from "@/modules/knowledge/components/ResourceRow";
-import { catalogHref, type Resource } from "@/modules/knowledge/model";
+import { catalogHref, conceptHref, type Resource } from "@/modules/knowledge/model";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { readerHref } from "@/modules/knowledge/reader/links";
+import { resourceKey, schemeIconName, schemeOfConcept } from "@/modules/knowledge/taxonomy";
 import { conversationTitle, type Conversation } from "@/modules/projects";
 
 import type { MemberHomeDomain, MemberHomeRecommended, StarterPrompt } from "../api";
-import { topicIcon } from "../domainIcon";
+import { conceptIcon } from "../domainIcon";
 
 const DOMAINS = 6;
 
@@ -208,11 +210,11 @@ const REASON_ICON: Readonly<Record<ReasonKind, LucideIcon>> = {
   STARTER_PROMPT: MessageSquare,
   FROM_YOUR_SPACE: Layers,
   BECAUSE_YOU_READ: Tag,
-  SAVED_TOPIC: Tag,
+  SAVED_CONCEPT: Tag,
   POPULAR: Eye,
 };
 
-/** The chip's words for a reason; `label` is its subject (a starter's title, a space or topic name). */
+/** The chip's words for a reason; `label` is its subject (a starter's title, a space or concept name). */
 function reasonText(kind: ReasonKind, label: string): string {
   switch (kind) {
     case "STARTER_PROMPT":
@@ -220,7 +222,7 @@ function reasonText(kind: ReasonKind, label: string): string {
     case "FROM_YOUR_SPACE":
       return `Trong ${label}`;
     case "BECAUSE_YOU_READ":
-    case "SAVED_TOPIC":
+    case "SAVED_CONCEPT":
       return `Thêm về ${label}`;
     case "POPULAR":
       return "Đọc nhiều nhất";
@@ -276,7 +278,8 @@ export function PickedForYou({ picks, starters }: { picks: readonly Pick[]; star
 
 /* ═══════════════ Explore by domain ═══════════════ */
 
-/** Explore by domain (preview `domainCard`): each domain in its colour with what it holds, opening Knowledge filtered. */
+/** Explore by domain (preview `domainCard`): the first classification scheme's top concepts (`featuredConcepts`), each in
+ *  its colour with what it holds, opening Knowledge filtered to it. */
 export function ExploreByDomain({ domains }: { domains: readonly MemberHomeDomain[] }) {
   if (!domains.length) return null;
   return (
@@ -293,28 +296,29 @@ export function ExploreByDomain({ domains }: { domains: readonly MemberHomeDomai
       </div>
       <div className="home-domains__grid">
         {domains.slice(0, DOMAINS).map((d) => (
-          <DomainCard key={d.topic} domain={d} />
+          <DomainCard key={d.concept} domain={d} />
         ))}
       </div>
     </section>
   );
 }
 
-const topicHref = (topic: string | undefined) => catalogHref({ filters: { topic: [resourceId(topic)] } });
-
+/** A top concept: its icon in its colour (preview `conceptLook`), name, count, what's new, definition and its biggest
+ *  narrower concepts — each opening Browse filtered to it (`conceptHref`). */
 function DomainCard({ domain: d }: { domain: MemberHomeDomain }) {
-  const Icon = topicIcon(d.icon);
+  const concept = d.concept ?? "";
+  const Icon = conceptIcon(d.icon || schemeIconName(schemeOfConcept(concept)));
   const fresh = d.newDocumentCount ?? 0;
-  const top = (d.topTopics ?? []).filter((t) => (t.documentCount ?? 0) > 0).slice(0, 3);
+  const top = (d.topConcepts ?? []).filter((t) => (t.documentCount ?? 0) > 0).slice(0, 3);
   return (
-    <article className="home-domain" style={{ "--tone": d.color || "var(--accent)" } as CSSProperties}>
+    <article className="home-domain" style={{ "--tone": d.color || categoryColor(resourceKey(concept)) } as CSSProperties}>
       <div className="home-domain__head">
         <span className="home-domain__icon" aria-hidden>
           <Icon className="i" />
         </span>
         <div className="home-domain__titles">
           <h3 className="home-domain__name">
-            <NextLink className="home-domain__link" href={topicHref(d.topic)} title={d.displayName} translate="no">
+            <NextLink className="home-domain__link" href={conceptHref(concept)} title={d.displayName} translate="no">
               {d.displayName}
             </NextLink>
           </h3>
@@ -335,9 +339,9 @@ function DomainCard({ domain: d }: { domain: MemberHomeDomain }) {
         </p>
       ) : null}
       {top.length ? (
-        <div className="home-domain__topics">
+        <div className="home-domain__concepts">
           {top.map((t) => (
-            <NextLink key={t.topic} className="home-topic" href={topicHref(t.topic)} title={t.displayName} translate="no">
+            <NextLink key={t.concept} className="home-concept" href={conceptHref(t.concept ?? "")} title={t.displayName} translate="no">
               {t.displayName}
             </NextLink>
           ))}

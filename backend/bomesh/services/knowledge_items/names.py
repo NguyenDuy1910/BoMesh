@@ -1,8 +1,9 @@
 """Resource names of the Item family (AIP-122): the one builder and parser per name.
 
 Other resources are named by their owners: members (``workspaces.records``),
-topics and contributions (``knowledge_curation.records``), sources
-(``ingestion.names``), spaces (``collaboration``), workspaces (``kernel``).
+contributions (``knowledge_curation.records``), concept schemes and concepts
+(``taxonomy.names``), sources (``ingestion.names``), spaces (``collaboration``),
+workspaces (``kernel``).
 """
 
 from __future__ import annotations

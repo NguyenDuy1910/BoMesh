@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
-from bomesh.db.models import Item, ItemIndexState, ItemRevision, Tenant, Topic, User
+from bomesh.db.models import Item, ItemIndexState, ItemRevision, Tenant, User
 from harness import ApiClient, Sessions, World
 
 OWNER = "roles/collectionOwner"
@@ -80,12 +80,6 @@ class Scene:
             assert revision is not None
             revision.size_bytes = size
             revision.file_name = file_name
-
-    async def topic(self, code: str, name: str, *, kind: str = "topic", state: str = "active") -> Topic:
-        async with self.sessions.begin() as session:
-            topic = Topic(tenant_id=self.ws.id, code=code, kind=kind, topic_name=name, state=state)
-            session.add(topic)
-        return topic
 
     async def submit(self, candidate: Item, **body: Any) -> dict[str, Any]:
         api = await self.as_(self.member)

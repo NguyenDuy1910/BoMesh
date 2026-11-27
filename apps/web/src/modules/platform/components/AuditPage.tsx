@@ -75,6 +75,10 @@ const KIND_LABEL: Record<string, string> = {
   assistant: "Trợ lý",
   auditEvents: "Sự kiện nhật ký",
   components: "Thành phần",
+  conceptProposals: "Đề xuất phân loại",
+  conceptRules: "Quy tắc phân loại",
+  conceptSchemes: "Trục phân loại",
+  concepts: "Khái niệm",
   connections: "Tài khoản đã kết nối",
   connectors: "Trình kết nối",
   contributions: "Bài gửi",
@@ -111,9 +115,8 @@ const KIND_LABEL: Record<string, string> = {
   spaces: "Cộng đồng",
   syncs: "Lượt đồng bộ",
   tasks: "Tác vụ",
-  topicCorrections: "Lần sửa chủ đề",
-  topics: "Chủ đề",
   users: "Người dùng",
+  versions: "Phiên bản",
   workspaces: "Không gian làm việc",
 };
 

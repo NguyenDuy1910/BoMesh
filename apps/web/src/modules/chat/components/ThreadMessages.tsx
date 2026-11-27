@@ -304,7 +304,7 @@ export const Answer = memo(function Answer(props: AnswerProps) {
   return (
     <div className="chat-msg chat-msg--ai" id={`msg-${answer.key}`} ref={answerRef}>
       {index === attempts.length - 1 ? (
-        <WorkSteps steps={answer.steps} streaming={streaming} working={streaming && !shown.text} show={showSteps} files={shown.artifacts.length > 0} cited={cited} onOpenSource={onOpenSource} />
+        <WorkSteps steps={answer.steps} streaming={streaming} working={streaming && !shown.text} answered={shown.state === "COMPLETED"} show={showSteps} files={shown.artifacts.length > 0} cited={cited} onOpenSource={onOpenSource} />
       ) : null}
       <FreshnessNotice freshness={freshness} busy={busy} onUpdate={() => onRetry(answer, "again")} onLatest={() => setIndex(attempts.length - 1)} onPrevious={() => setIndex(attempts.length - 2)} />
       {shown.text || streaming ? <AnswerMarkdown text={shown.text} sources={shown.sources} streaming={streaming && !!shown.text} activeN={activeCite} onCite={cite} /> : null}

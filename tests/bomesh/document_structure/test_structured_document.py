@@ -313,3 +313,22 @@ def test_citation_target_round_trips_and_rejects_bad_copies():
     assert CitationTarget.from_json({**target.to_json(), "refs": []}) is None
     assert CitationTarget.from_json({**target.to_json(), "refs": ["#/texts/1"]}) is None
     assert CitationTarget.from_json("nope") is None
+
+
+def test_two_rows_of_one_table_are_two_citations():
+    """Every row of a table is cut from the same table node: only its marked cells tell rows apart."""
+
+    def row(number: int, quote: str) -> CitationTarget:
+        return CitationTarget(
+            item_id=item,
+            revision_number=1,
+            structure_version="0123456789abcdef",
+            refs=("tables/0",),
+            quote=quote,
+            highlights=(Highlight(sheet="Sheet1", range=f"A{number}:T{number}"),),
+        )
+
+    item = uuid4()
+    first, second, again = row(14, "STT = 4"), row(15, "STT = 5"), row(14, "STT = 4")
+
+    assert len({target.key for target in (first, second, again)}) == 2

@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select, update
 
 from bomesh.services.kernel.context import RequestContext
-from bomesh.services.knowledge_items.documents import set_document_metadata, tag_document
+from bomesh.services.knowledge_items.documents import set_document_metadata
 from bomesh.services.knowledge_items.indexing import sync_item_payloads
 from bomesh.services.knowledge_items.item_store import (
     ensure_personal_collection,
@@ -39,7 +39,6 @@ from bomesh.db.models import (
     IntegrationConnection,
     Item,
     RoleAssignment,
-    Topic,
 )
 from bomesh.errors import InvalidArgument
 from bomesh.services import InvalidDocumentStateError
@@ -273,41 +272,19 @@ async def test_a_failed_object_delete_is_retried_by_the_next_purge(
     assert content_key(workspace.code, own) not in fakes.storage.objects
 
 
-async def test_document_metadata_and_tags_go_through_one_tagger(
+async def test_document_metadata_sets_the_summary(
     client, world: World, knowledge: Knowledge
 ) -> None:
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
     collection = await world.make_collection(workspace)
     document = await world.make_document(collection)
-    async with transaction_scope(knowledge.sessions) as session:
-        session.add(Topic(tenant_id=workspace.id, code="finance", kind="domain", topic_name="Finance"))
-        session.add(
-            Topic(tenant_id=workspace.id, code="old", kind="domain", topic_name="Old", state="rejected")
-        )
 
     async with transaction_scope(knowledge.sessions) as session:
-        await set_document_metadata(
-            session,
-            workspace.id,
-            document.id,
-            summary="Spending rules",
-            topics=["finance"],
-            created_by_user_id=admin.id,
-        )
+        await set_document_metadata(session, workspace.id, document.id, summary="Spending rules")
     shown = (await (await client.as_(admin)).get(item_url(document))).json()["document"]
-    with pytest.raises(InvalidArgument):
-        async with transaction_scope(knowledge.sessions) as session:
-            await tag_document(session, workspace.id, document.id, ["old"], created_by_user_id=None)
-    unknown = await (await client.as_(admin)).patch(
-        item_url(document),
-        params={"updateMask": "document.topics"},
-        json={"document": {"topics": [f"workspaces/{workspace.id}/topics/missing"]}},
-    )
 
     assert shown["summary"] == "Spending rules"
-    assert shown["topics"] == [f"workspaces/{workspace.id}/topics/finance"]
-    assert unknown.status_code == 400
 
 
 async def test_origin_names_the_source_by_its_code(

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -16,6 +16,7 @@ from bomesh.document_structure import CitationTarget, ContentNode
 
 if TYPE_CHECKING:
     from bomesh.services.previews.engine import PreviewFile, Representation
+    from bomesh.services.taxonomy.assignments import ConceptAssignmentRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,15 +69,52 @@ class Cover:
     cells: tuple[tuple[str, ...], ...] = ()
 
 
+#: A concept as its name parts: (scheme code, notation).
+ConceptKey = tuple[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class ConceptChoice:
+    """One UpdateItem ``document.concepts`` entry: becomes an ACCEPTED human label."""
+
+    concept: ConceptKey
+    primary: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Issuance:
+    """``DocumentIssuance``: concepts as (scheme code, notation), supersedes as item IDs."""
+
+    issuer: ConceptKey | None
+    campus: ConceptKey | None
+    number: str | None
+    issued_on: date | None
+    effective_on: date | None
+    supersedes: tuple[UUID, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Applicability:
+    """``DocumentApplicability``; ``level`` lowercase storage value or None (unknown)."""
+
+    level: str | None
+    units: tuple[ConceptKey, ...]
+    programs: tuple[ConceptKey, ...]
+    cohorts: tuple[int, ...]
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentFacet:
     file_name: str | None
     mime_type: str | None
     size_bytes: int | None
     purpose: str
-    topics: tuple[str, ...]
-    #: The subset of ``topics`` the assistant applied (``item_topics.created_by_user_id`` NULL).
-    assistant_topics: tuple[str, ...]
+    #: Whole-document and section labels, REJECTED omitted (``item_concepts``).
+    concepts: tuple[ConceptAssignmentRecord, ...]
+    #: ``document.issuance`` (None without a profile).
+    issuance: Issuance | None
+    #: ``document.applicability`` (None without a profile).
+    applicability: Applicability | None
     #: ``items.description``.
     summary: str | None
     language_code: str | None
@@ -232,8 +270,9 @@ class Interval:
 
 @dataclass(frozen=True, slots=True)
 class FacetValue:
-    """``value`` is the raw key: an item or member ID, a topic or source code, or a
-    literal; interval facets carry ``interval`` instead (``value`` is ``None``)."""
+    """``value`` is the raw key: an item or member ID, a ``{scheme}/{notation}`` concept,
+    a source code, or a literal; interval facets carry ``interval`` instead (``value``
+    is ``None``)."""
 
     value: str | None
     display_name: str | None
@@ -248,10 +287,52 @@ class Facet:
 
 
 @dataclass(frozen=True, slots=True)
+class InterpretedConcept:
+    """A concept the query names, read from ``text`` (group expansion included)."""
+
+    scheme: str
+    notation: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class InterpretationOption:
+    """One reading of an ambiguous term: the term as ``concepts`` (``(scheme, notation)``)."""
+
+    scheme: str
+    concepts: tuple[tuple[str, str], ...]
+    display_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class InterpretationAmbiguity:
+    text: str
+    options: tuple[InterpretationOption, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SearchGroup:
+    """The top results under one option of the grouped ambiguity."""
+
+    option: str
+    results: tuple[SearchResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SearchInterpretation:
+    """How a text query was read against the published taxonomy (``conversation_loop.md`` "Knowledge retrieval")."""
+
+    concepts: tuple[InterpretedConcept, ...] = ()
+    ambiguities: tuple[InterpretationAmbiguity, ...] = ()
+    groups: tuple[SearchGroup, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SearchPage:
     results: Sequence[SearchResult]
     facets: Sequence[Facet]
     total_size: int
+    interpretation: SearchInterpretation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,7 +352,6 @@ class NewDocument:
     summary: str | None = None
     language_code: str | None = None
     owner_id: UUID | None = None
-    topics: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,11 +447,16 @@ class FacetRequest:
     #: ``where`` is the search's own filter (not excluded, or nothing to exclude):
     #: the facet counts nothing when the search matches nothing.
     matches_request: bool = False
+    #: Concept facets: only concepts of these scheme codes (``FacetKey.prefixes``).
+    prefixes: tuple[str, ...] = ()
 
 
 __all__ = [
     "Ancestor",
+    "Applicability",
     "CollectionFacet",
+    "ConceptKey",
+    "ConceptChoice",
     "ContentRecord",
     "CollectionImportChange",
     "CollectionImportResult",
@@ -380,6 +465,10 @@ __all__ = [
     "Facet",
     "FacetRequest",
     "FacetValue",
+    "InterpretationAmbiguity",
+    "InterpretationOption",
+    "InterpretedConcept",
+    "Issuance",
     "Interval",
     "ItemPage",
     "ItemRecord",
@@ -390,6 +479,8 @@ __all__ = [
     "PolicyRecord",
     "PreviewRecord",
     "RevisionRecord",
+    "SearchGroup",
+    "SearchInterpretation",
     "SearchPage",
     "SearchReference",
     "SearchRequest",

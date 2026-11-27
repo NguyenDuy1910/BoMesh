@@ -33,10 +33,10 @@ import {
 } from "lucide-react";
 
 /**
- * The icons people give domains and topics (`Topic.icon`), in picker order, with what each stands for. The names are
- * the preview's (`TOPIC_ICONS` in `core/catalog.js`, drawn from its sprite), so either client draws what the other stored.
+ * The icons people give top concepts (`Concept.icon`), in picker order, with what each stands for. The names are the
+ * preview's (`CONCEPT_ICONS` in `core/catalog.js`, drawn from its sprite), so either client draws what the other stored.
  */
-export const TOPIC_ICONS: readonly { name: string; label: string; icon: LucideIcon }[] = [
+export const CONCEPT_ICONS: readonly { name: string; label: string; icon: LucideIcon }[] = [
   { name: "layers", label: "Chung", icon: Layers },
   { name: "book", label: "Sách", icon: BookOpen },
   { name: "file-text", label: "Tài liệu", icon: FileText },
@@ -69,10 +69,8 @@ export const TOPIC_ICONS: readonly { name: string; label: string; icon: LucideIc
   { name: "tag", label: "Thẻ", icon: Tag },
 ];
 
-/** A new domain's icon; also what a domain without one shows. */
-export const DOMAIN_ICON = "layers";
+const ICONS: ReadonlyMap<string, LucideIcon> = new Map(CONCEPT_ICONS.map((i) => [i.name, i.icon]));
 
-const ICONS: ReadonlyMap<string, LucideIcon> = new Map(TOPIC_ICONS.map((i) => [i.name, i.icon]));
-
-/** The icon for a topic's stored icon name; `fallback` (a tag by default) when it has none or names one we don't draw. */
-export const topicIcon = (name: string | undefined, fallback: LucideIcon = Tag): LucideIcon => (name && ICONS.get(name)) || fallback;
+/** The icon for a stored icon name (a concept's, or a scheme's from `schemeIconName`); `fallback` (a tag by default) when
+ *  there is none or it names one we don't draw. */
+export const conceptIcon = (name: string | undefined, fallback: LucideIcon = Tag): LucideIcon => (name && ICONS.get(name)) || fallback;

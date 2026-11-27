@@ -7,34 +7,41 @@ import { useCallback, useMemo, useRef } from "react";
 import { api, call, resourceId } from "@/lib/api/client";
 import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
-import { batchGetItems, getItem, listItems, searchItems } from "@/modules/knowledge/api";
-import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeBases } from "@/modules/knowledge/queries";
+import { batchGetItems, getItem, listItems, searchItems, type Concept } from "@/modules/knowledge/api";
+import { invalidateKnowledge, knowledgeKeys, useItem, useKnowledgeBases, useTaxonomy } from "@/modules/knowledge/queries";
+import { buildTaxonomy, classSchemes, type Taxonomy } from "@/modules/knowledge/taxonomy";
 
 import {
   batchGetRunTasks,
   countContributions,
   countItems,
   getRunTask,
-  lastTopicImport,
   listActiveIngestionRuns,
-  listAllTopics,
-  listOpenTopicCorrections,
   listRunTasksPage,
   pageContributionsOf,
   type Contribution,
   type IngestionRun,
   type IngestionTask,
   type Item,
-  type Topic,
 } from "./api";
 import { useHeldDecisions } from "./decisions";
-import { assistantTaggedFilter, detailsFilter, documentsToProcess, publishedFilter, REVIEW_READY, reverifyFilter, SUBMISSIONS_TO_PROCESS } from "./docFilter";
+import { detailsFilter, documentsToProcess, publishedFilter, REVIEW_READY, reverifyFilter, SUBMISSIONS_TO_PROCESS, suggestedFilter, unclassifiedFilter } from "./docFilter";
+import { requiredSchemeNames, suggestedGroups, type SuggestedGroup } from "./governance";
 import type { DocCounts } from "./model";
 import { FIRST_RUN_PAGE, nextRunTaskCursor, taskKey, type RunTaskCursor } from "./processingSteps";
+import {
+  compileClassificationPrompt,
+  listConceptRules,
+  listOpenProposals,
+  listSchemeVersions,
+  listSharedLabels,
+  publishConceptScheme,
+  type ConceptProposal,
+  type ConceptScheme,
+} from "./taxonomyApi";
 
 /** Query keys live under the knowledge prefixes so `invalidateKnowledge` refreshes them too. */
 export const curationKeys = {
-  topics: (ws: string) => [ws, "topics", "all"] as const,
   policy: (ws: string, item: string) => [ws, "items", "policy", item] as const,
   /** One page of Documents → All (filter, order, page token). */
   documents: (ws: string, filter: string, orderBy: string, pageToken: string) => [ws, "items", "documents-page", filter, orderBy, pageToken] as const,
@@ -42,15 +49,21 @@ export const curationKeys = {
   activeRuns: (ws: string) => [ws, "ingestionRuns", "active"] as const,
   /** The tasks of the documents on screen in a run in flight (under the active runs, so invalidating them reads them again). */
   runTasks: (ws: string, run: string) => [ws, "ingestionRuns", "active", "tasks", run] as const,
-  /** Topics → Suggestions: open topic corrections (under the topics prefix) and assistant-tagged documents. */
-  corrections: (ws: string) => [ws, "topics", "corrections-open"] as const,
-  assistantTagged: (ws: string) => [ws, "items", "assistant-topics"] as const,
+  /** Classification › Gợi ý: the suggested-label facet and card lists (under items, so any document change refreshes them). */
+  suggested: (ws: string) => [ws, "items", "suggested-concepts"] as const,
+  /** Classification's side reads, under the taxonomy prefix so a taxonomy edit refreshes them. */
+  schemePreview: (ws: string, scheme: string, etag: string) => [ws, "taxonomy", "preview", scheme, etag] as const,
+  schemeVersions: (ws: string, scheme: string) => [ws, "taxonomy", "versions", scheme] as const,
+  sharedLabels: (ws: string) => [ws, "taxonomy", "sharedLabels"] as const,
+  proposals: (ws: string) => [ws, "taxonomy", "proposals"] as const,
+  conceptRules: (ws: string, concept: string) => [ws, "taxonomy", "rules", concept] as const,
+  prompt: (ws: string) => [ws, "taxonomy", "prompt"] as const,
 };
 
 /** Refresh every curation read plus the shell's badges and the Overview. */
 export function invalidateCuration(qc: QueryClient, ws: string) {
   invalidateKnowledge(qc, ws);
-  void qc.invalidateQueries({ queryKey: knowledgeKeys.topics(ws) });
+  void qc.invalidateQueries({ queryKey: knowledgeKeys.taxonomy(ws) });
   void qc.invalidateQueries({ queryKey: [ws, "shell-badge"] });
   void qc.invalidateQueries({ queryKey: [ws, "overview"] });
   void qc.invalidateQueries({ queryKey: curationKeys.activeRuns(ws) });
@@ -171,37 +184,6 @@ export function useReviewableBases() {
   return { ...bases, data };
 }
 
-/** Domains and topics in every state the caller may see (proposals for admins), archived included. */
-export function useAllTopics({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: curationKeys.topics(id), enabled, queryFn: () => listAllTopics(id, { deleted: true }) });
-}
-
-/** Writes a saved topic into the topics list at once, so the editor doesn't flash the old values until the refetch. */
-export function useRememberTopic() {
-  const { id } = useWorkspace();
-  const qc = useQueryClient();
-  return useCallback(
-    (topic: Topic) =>
-      qc.setQueryData<Topic[]>(curationKeys.topics(id), (list) =>
-        list && (list.some((x) => x.name === topic.name) ? list.map((x) => (x.name === topic.name ? topic : x)) : [...list, topic]),
-      ),
-    [qc, id],
-  );
-}
-
-/** Open topic corrections (Topics → Suggestions → Keywords from reviewers’ corrections; `topics.update`). */
-export function useOpenTopicCorrections({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: curationKeys.corrections(id), enabled, queryFn: () => listOpenTopicCorrections(id) });
-}
-
-/** Who imported the topics last and when (audit log); under the topics prefix, so an import refreshes it. */
-export function useLastTopicImport({ enabled = true }: { enabled?: boolean } = {}) {
-  const { id } = useWorkspace();
-  return useQuery({ queryKey: [id, "topics", "last-import"], enabled, queryFn: () => lastTopicImport(id), staleTime: 60_000 });
-}
-
 /**
  * Who reads a collection's published documents (preview `X.whoCanSee`): from the IAM policy of the collection that
  * decides its access — a folder's root, or the folder itself when it doesn't inherit access — which its owners may
@@ -228,7 +210,7 @@ export function useCollectionAudience(collection: string | undefined | null): { 
 }
 
 export interface DocCountsData extends DocCounts {
-  /** Preview views without an API (first-sync batches, low-confidence topics): never counted. */
+  /** Preview views without an API (first-sync batches, low-confidence labels): never counted. */
   batches?: undefined;
   confirm?: undefined;
   /** Published documents in scope, and how many of them are verified (Knowledge health's share). */
@@ -236,7 +218,7 @@ export interface DocCountsData extends DocCounts {
   verified: number;
 }
 
-/** Contribution names with a decision in its Undo window (topic decisions hold other names). */
+/** Contribution names with a decision in its Undo window (classification decisions hold other names). */
 export const heldContributions = (held: ReadonlySet<string>) => [...held].filter((n) => n.includes("/contributions/"));
 
 /**
@@ -252,6 +234,7 @@ export function useDocCounts(): { data?: DocCountsData; isPending: boolean } {
   const held = useHeldDecisions();
   const docScope = useDocScope({ enabled });
   const { scope } = docScope;
+  const { data: taxonomy } = useTaxonomy();
   // Document counts wait for the scope; the contribution counts don't.
   const doc = (filter: string): CountRead | undefined => (docScope.isPending ? undefined : scope.length ? { of: "items", filter } : null);
   const counts = useCounts(
@@ -261,7 +244,7 @@ export function useDocCounts(): { data?: DocCountsData; isPending: boolean } {
       doc(documentsToProcess(scope)),
       doc(documentsToProcess(scope, WAITING_STATES)),
       doc(reverifyFilter(scope)),
-      doc(detailsFilter(scope)),
+      doc(detailsFilter(scope, undefined, requiredSchemeNames(taxonomy))),
       doc(publishedFilter(scope)),
       doc(publishedFilter(scope, { verified: true })),
     ],
@@ -347,7 +330,7 @@ export function useContributionsOf(items: readonly string[]) {
   });
 }
 
-/* ═══════════════ Server-paged document lists (Quality lists, Topics → Without a topic) ═══════════════ */
+/* ═══════════════ Server-paged document lists (Quality lists, Classification › Gợi ý) ═══════════════ */
 
 /**
  * One server page of documents (ListItems FULL, `pageSize` per page) with the page tokens read so far: Previous goes
@@ -360,24 +343,157 @@ export function useItemPages(filter: string, orderBy: string, { pageSize = 20, e
   return { ...query, items: query.data?.items ?? [], pageSize };
 }
 
-/**
- * Per topic, how many documents in `scope` carry it as the assistant applied it, unconfirmed (Topics to confirm, a
- * topic's Distribution): one SearchItems read of the `document.assistantTopics` facet, by topic name (a DOMAIN rolls
- * up its topics).
- */
-export function useAssistantTaggedCounts(scope: readonly string[], { enabled = true }: { enabled?: boolean } = {}) {
+/* ═══════════════ Classification (Studio › Phân loại) ═══════════════ */
+
+/** Refresh the taxonomy and Classification's side reads (a working-copy edit: labels, counts of changes, previews). */
+export function useInvalidateTaxonomy() {
   const { id } = useWorkspace();
-  const filter = assistantTaggedFilter(scope);
+  const qc = useQueryClient();
+  return useCallback(() => void qc.invalidateQueries({ queryKey: knowledgeKeys.taxonomy(id) }), [qc, id]);
+}
+
+/**
+ * Writes a saved concept into the taxonomy at once (or takes a deleted one out), so the detail doesn't flash the old
+ * values until the refetch that `invalidateCuration` starts.
+ */
+export function useRememberConcept() {
+  const { id } = useWorkspace();
+  const qc = useQueryClient();
+  return useCallback(
+    (concept: Concept, { removed = false }: { removed?: boolean } = {}) =>
+      qc.setQueryData<Taxonomy>(knowledgeKeys.taxonomy(id), (t) => {
+        if (!t) return t;
+        const all = [...t.byScheme.values()].flat();
+        const known = all.some((c) => c.name === concept.name);
+        const next = removed ? all.filter((c) => c.name !== concept.name) : known ? all.map((c) => (c.name === concept.name ? concept : c)) : [...all, concept];
+        return buildTaxonomy(t.schemes, next);
+      }),
+    [qc, id],
+  );
+}
+
+/**
+ * The scheme's next version as publishing would make it (`:publish` `validateOnly`): the working copy's changes (the
+ * tree's dots, Version history's working copy) and the Publish dialog's problems, warnings and impact. Read only while
+ * there is something to publish; the scheme's etag keys it, so every edit reads it again.
+ */
+export function useSchemePreview(scheme: ConceptScheme | undefined, { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
   return useQuery({
-    queryKey: [...curationKeys.assistantTagged(id), "facet", filter],
+    queryKey: curationKeys.schemePreview(id, scheme?.name ?? "", `${scheme?.etag ?? ""}:${scheme?.unpublishedChanges ?? 0}`),
+    queryFn: () => publishConceptScheme(scheme!, { validateOnly: true }),
+    enabled: enabled && !!scheme && (scheme.unpublishedChanges ?? 0) > 0,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/** A scheme's published versions, newest first (Version history; loads while it's open). */
+export function useSchemeVersions(scheme: string, { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: curationKeys.schemeVersions(id, scheme), queryFn: () => listSchemeVersions(scheme), enabled: enabled && !!scheme });
+}
+
+/** Labels several concepts share (Duplicate labels and its count on the scheme header). */
+export function useSharedLabels({ enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: curationKeys.sharedLabels(id), queryFn: () => listSharedLabels(id), enabled, staleTime: 60_000 });
+}
+
+/** Open concept proposals, both kinds (Gợi ý › New concept proposals and Learned from edits). */
+export function useOpenProposals({ enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: curationKeys.proposals(id), queryFn: () => listOpenProposals(id), enabled, staleTime: 60_000 });
+}
+
+/** Classification rules: those that file documents under `concept` (its detail's Rules), or every rule with `concept`
+ *  "" (How the assistant classifies). Read-only in the web. */
+export function useConceptRules(concept: string, { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: curationKeys.conceptRules(id, concept), queryFn: () => listConceptRules(id, concept || undefined), enabled, staleTime: 5 * 60_000 });
+}
+
+/** The classification prompt and the rules checked before it (How the assistant classifies; loads while open). */
+export function useClassificationPrompt({ enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  return useQuery({ queryKey: curationKeys.prompt(id), queryFn: () => compileClassificationPrompt(id), enabled, staleTime: 0 });
+}
+
+/**
+ * Per concept, how many published documents in `scope` have it suggested (hierarchical: a concept counts the documents
+ * of everything under it): one SearchItems read with a `document.suggestedConcepts` facet per classification scheme.
+ */
+export function useSuggestedCounts(scope: readonly string[], schemes: readonly string[], { enabled = true }: { enabled?: boolean } = {}) {
+  const { id } = useWorkspace();
+  const filter = suggestedFilter(scope);
+  return useQuery({
+    queryKey: [...curationKeys.suggested(id), "facet", filter, schemes],
     queryFn: async ({ signal }): Promise<ReadonlyMap<string, number>> => {
-      // The facet counts within the whole filter (scope and "carries an assistant topic").
-      const facetSpecs = [{ field: "document.assistantTopics", limit: 1000, excludedFromFilter: false }];
+      // Counted within the whole filter (scope, published, has a suggestion).
+      const facetSpecs = schemes.map((s) => ({ field: "document.suggestedConcepts", prefixes: [s], limit: 1000, excludedFromFilter: false }));
       const res = await searchItems(id, { filter, facetSpecs, pageSize: 1 }, { signal });
-      const values = res.facets?.find((f) => f.field === "document.assistantTopics")?.values ?? [];
+      const values = (res.facets ?? []).filter((f) => f.field === "document.suggestedConcepts").flatMap((f) => f.values ?? []);
       return new Map(values.map((v) => [v.value ?? "", v.documentCount ?? 0]));
     },
-    enabled: enabled && scope.length > 0,
+    enabled: enabled && scope.length > 0 && schemes.length > 0,
     staleTime: 60_000,
   });
+}
+
+/** The held-decision key of a suggestion card (hidden while its Accept all / Reject all is in the Undo window). */
+export const suggestedKey = (concept: string) => `${concept}#suggested`;
+
+export interface ClassificationSuggestions {
+  /** Labels awaiting review: one card per concept (decisions in their Undo window left out). */
+  groups: SuggestedGroup[];
+  /** Per classification scheme the assistant classifies: its Not classified pool's filter and size (non-empty ones). */
+  pools: { scheme: ConceptScheme; filter: string; n: number }[];
+  /** Open proposals of both kinds, without those in their Undo window. */
+  proposals: ConceptProposal[];
+  scope: readonly string[];
+}
+
+/**
+ * What waits in Classification › Gợi ý for the caller (preview `suggestionCount`): suggestion cards, Not classified pools
+ * with documents, open proposals. `count` is the Gợi ý tab's number (and Overview's); `data` is undefined for callers
+ * without the section or while it loads.
+ */
+export function useClassificationSuggestions(): { data?: ClassificationSuggestions; count?: number; isPending: boolean; isError: boolean; error: unknown; refetch: () => void } {
+  const { can } = useWorkspace();
+  const enabled = can("conceptSchemes.update") || can("conceptProposals.decide");
+  const { data: t, isPending: taxonomyPending } = useTaxonomy();
+  const held = useHeldDecisions();
+  const docScope = useDocScope({ enabled });
+  const { scope } = docScope;
+  const schemes = useMemo(() => classSchemes(t).map((s) => s.name ?? ""), [t]);
+  const suggested = useSuggestedCounts(scope, schemes, { enabled });
+  const pooled = classSchemes(t).filter((s) => s.llmPolicy !== "NEVER");
+  const poolFilters = pooled.map((s) => unclassifiedFilter(scope, s.name ?? ""));
+  const pools = useCounts(
+    poolFilters.map((filter): CountRead | undefined => (docScope.isPending ? undefined : scope.length && filter ? { of: "items", filter } : null)),
+    { enabled },
+  );
+  const proposals = useOpenProposals({ enabled });
+  const pending = enabled && (taxonomyPending || docScope.isPending || (scope.length > 0 && suggested.isPending) || pools.isPending || proposals.isPending);
+  const failed = docScope.isError ? docScope : suggested.isError ? suggested : proposals;
+  if (!enabled || pending || !proposals.data) {
+    return { isPending: pending, isError: !!failed.isError, error: failed.error, refetch: () => void failed.refetch() };
+  }
+  const groups = suggestedGroups(t, suggested.data ?? new Map()).filter((g) => !held.has(suggestedKey(g.concept)));
+  const poolList = pooled.map((scheme, i) => ({ scheme, filter: poolFilters[i], n: pools.data[i] ?? 0 })).filter((p) => p.n > 0);
+  const open = proposals.data.filter((p) => !held.has(p.name ?? ""));
+  return {
+    data: { groups, pools: poolList, proposals: open, scope },
+    count: groups.length + poolList.length + open.length,
+    isPending: false,
+    isError: false,
+    error: null,
+    refetch: () => undefined,
+  };
+}
+
+/** The Gợi ý tab's count, for Overview › Knowledge health (undefined without the section or while it loads). */
+export function useSuggestionCount(): { data?: number; isPending: boolean } {
+  const s = useClassificationSuggestions();
+  return { data: s.count, isPending: s.isPending };
 }

@@ -24,7 +24,7 @@ unavailable or omits the detail; it never fakes the data. Full list:
 | Projects (sidebar folders) | No resource at all | "New project" stays disabled with the tooltip "Projects aren't available yet." |
 | Conversation messages | No stored `workLog`, follow-up suggestions, or question attachments | A reloaded answer loses its work line and attachment chips; nothing is invented to replace them |
 | Reader | `GetItem` `PERMISSION_DENIED` doesn't name the governing collection; no "which conversations cite this item" | Request-access can't be offered from the denial; not attempted |
-| Review/topics | `ApproveContribution` can't publish as a new revision of an existing item; nothing creates `PROPOSED` topics | Submit-a-new-version and topic proposal flows are not built |
+| Review | `ApproveContribution` can't publish as a new revision of an existing item | Submit-a-new-version flow is not built |
 | Workspace admin | `AuditEvent` has no sign-in method/device; `WorkspaceAssistant` has no citations setting; denied requests have no Undo | Those controls are absent rather than stubbed |
 | Work/Requests | Artifact has no draft-type field, no `sourceItems` append, no copy; request messages have no attachments/transitions/assignment history | Same — omitted, not mocked |
 | Platform console | Can't read owner/admins of workspaces the operator isn't in; `WorkspaceUsage` has no daily series; no ingestion error-class filter; `Component` has no latency/uptime | Those columns/filters are absent |

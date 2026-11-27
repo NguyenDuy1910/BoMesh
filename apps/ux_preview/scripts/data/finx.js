@@ -60,7 +60,7 @@ seedWorkspace('ws-finx', () => {
     batch: 'Batch transfers submitted after 15:30 are settled on the next business day.',
     idemKey: 'Every POST to a payment API must carry an Idempotency-Key header.',
     idemReplay: 'The gateway stores the first response for 24 hours and replays it for any retry with the same key.',
-    ledger: 'Ledger balances are updated only by consuming events from the payments topic, never by direct writes.',
+    ledger: 'Ledger balances are updated only by consuming events from the payments event stream, never by direct writes.',
     failover: 'If the timeout rate exceeds 2% for 5 minutes, fail over card authorization to the secondary acquirer.',
     mau: 'A monthly active customer has at least one customer-initiated financial transaction in the calendar month; logins alone do not count.',
     hybrid: 'Employees work from the office at least three days a week; Tuesday and Thursday are team days.',
@@ -190,12 +190,12 @@ seedWorkspace('ws-finx', () => {
     { id: 'run-fx-413', source: 'src-fx-prod', kb: 'kb-fx-prod', trigger: 'Scheduled', status: 'completed', started: P(3, 4), dur: 305e3, counts: { total: 3, ok: 3, failed: 0, skipped: 0 }, by: 'Schedule' },
     /* The archive's first sync. `backfill` holds the pipeline at scale (never simulated file by file):
        found → filtered out → read → classified → published | held for review; failed by error class.
-       Classified = published + review. Of published: filed under a topic, topics to confirm (classGroups), no topic. */
+       Classified = published + review. Of published: filed under a concept, concepts to confirm (assignmentBatches), none. */
     { id: 'run-fx-419', source: 'src-fx-archive', kb: 'kb-fx-ops', trigger: 'First sync', status: 'running', started: P(0, 9), counts: { total: 96410, ok: 61420, failed: 410, skipped: 0 }, by: 'Võ Thị Lan',
       backfill: {
         found: 100240, filtered: 3830, filteredBy: [['Images and videos', 2900], ['Not changed since 2018', 930]],
         read: 61830, classified: 61420, published: 58470, review: 2950, failed: 410, rate: 118,
-        topics: { filed: 52800, confirm: 1860, none: 3810 },
+        concepts: { filed: 52800, confirm: 1860, none: 3810 },
         issues: [['password', 'Password-protected', 120, 'Remove the password at the source, then sync again.'], ['scanned', 'Scanned pages without text', 210, 'Text recognition (OCR) is off in the platform policy.'], ['large', 'Larger than 100 MB', 80, 'Split the file at the source, or ask for a higher limit.']],
       } },
   ];
@@ -214,16 +214,20 @@ seedWorkspace('ws-finx', () => {
       note: 'Newer than a published document with the same name: they could replace it.',
       sample: ['Payment Cut-off Times & Settlement Windows (2025).pdf', 'Dispute Handling Procedure — rev 4.docx', 'Daily Reconciliation — 2025 update.docx', 'QR settlement procedure — v3.pdf', 'Card limit changes — 2025.docx'] },
   ];
-  /* Published from the archive: the topics the assistant applied, grouped for people to confirm in bulk, and what it gave
-     no topic. Decided in Knowledge Studio → Topics → Suggestions. They are already readable; this is about where people
-     browse them. */
-  D.classGroups = [
-    { id: 'cg-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-cards', n: 940, keywords: ['chargeback', 'dispute'], status: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
-    { id: 'cg-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-recon', n: 520, keywords: ['matching', 'break'], status: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },
-    { id: 'cg-fx-pay', run: 'run-fx-419', kb: 'kb-fx-ops', topic: 't-payments', n: 400, keywords: ['settlement', 'cut-off'], status: 'open', sample: ['Holiday settlement calendar 2023.xlsx', 'Interbank transfer limits memo.pdf', 'Same-day settlement pilot.docx', 'Batch file formats.pdf', 'Cut-off exceptions — Tet.docx'] },
-    { id: 'cg-fx-none', run: 'run-fx-419', kb: 'kb-fx-ops', topic: null, n: 3810, status: 'open',
-      proposals: [['Merchant onboarding', 1240, ['merchant onboarding', 'mid', 'merchant agreement']], ['Branch operations', 980, ['branch', 'cash count', 'teller']]],
+  /* Published from the archive: the concepts the assistant applied, grouped for people to confirm in bulk (counts only), and
+     what it left in the Subject pool. Decided in Knowledge Studio → Classification → Suggestions. They are already
+     readable; this is about where people browse them. */
+  D.assignmentBatches = [
+    { id: 'ab-fx-cards', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: 't-cards', n: 940, state: 'open', sample: ['Branch guide — handling card complaints.pdf', 'Visa dispute timelines 2022.docx', 'Refund vs chargeback FAQ.docx', 'Card scheme fee notes.xlsx', 'Merchant dispute escalation.pdf'] },
+    { id: 'ab-fx-recon', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: 't-recon', n: 520, state: 'open', sample: ['End-of-day matching — branches.pdf', 'Suspense account breaks 2021.xlsx', 'GL vs core matching notes.docx', 'Nostro matching guide.pdf', 'Breaks ageing report template.xlsx'] },
+    { id: 'ab-fx-pay', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: 't-payments', n: 400, state: 'open', sample: ['Holiday settlement calendar 2023.xlsx', 'Interbank transfer limits memo.pdf', 'Same-day settlement pilot.docx', 'Batch file formats.pdf', 'Cut-off exceptions — Tet.docx'] },
+    { id: 'ab-fx-none', run: 'run-fx-419', kb: 'kb-fx-ops', scheme: 'subject', concept: null, n: 3810, state: 'open',
       sample: ['Merchant onboarding checklist 2020.pdf', 'Teller shift handover.docx', 'Branch opening hours — Tet.pdf', 'MID request form.xlsx', 'Cash count procedure — branches.pdf'] },
+  ];
+  /* The weekly clustering of the Subject pool: two groups of archive documents no concept fits yet. */
+  D.conceptProposals = [
+    { id: 'cp-fx-merchant', scheme: 'subject', kind: 'concept', name: 'Merchant onboarding', definition: 'Signing up merchants: checklists, MID requests and merchant agreements.', broader: 'd-ops', origin: 'cluster', state: 'open', docs: [], n: 1240, at: P(0, 2) },
+    { id: 'cp-fx-branch', scheme: 'subject', kind: 'concept', name: 'Branch operations', definition: 'Running a branch day to day: cash counts, teller shifts and opening hours.', broader: 'd-ops', origin: 'cluster', state: 'open', docs: [], n: 980, at: P(0, 2) },
   ];
 
   /* Access requests (to collections) */
@@ -369,8 +373,8 @@ seedWorkspace('ws-finx', () => {
         cells: {
           [K]: {
             perf: cell('180k messages/s at p99 42 ms.', K, 3, 'In our load test Confluent Cloud sustained 180,000 messages per second at a p99 latency of 42 ms.'),
-            eos: cell('Yes — idempotent producers and transactions.', K, 4, 'Idempotent producers and transactions give exactly-once delivery between Kafka topics out of the box.'),
-            ops: cell('Low — the vendor runs brokers and upgrades.', K, 5, 'Brokers, upgrades and scaling are run by the vendor; our team only manages topics, ACLs and connectors.'),
+            eos: cell('Yes — idempotent producers and transactions.', K, 4, 'Idempotent producers and transactions give exactly-once delivery between Kafka streams out of the box.'),
+            ops: cell('Low — the vendor runs brokers and upgrades.', K, 5, 'Brokers, upgrades and scaling are run by the vendor; our team only manages streams, ACLs and connectors.'),
             res: cell('No Vietnam region; nearest is Singapore.', K, 6, 'The nearest Confluent Cloud region is Singapore; no region is available in Vietnam.'),
             cost: cell('About USD 1.26M over 3 years.', K, 7, 'The estimated three-year cost is USD 1.26 million, including support and private networking.'),
           },
@@ -396,7 +400,7 @@ seedWorkspace('ws-finx', () => {
       created: P(3), updated: P(0, 20), sources: ['fx-eng-adr027', 'fx-eng-adr031'],
       data: {
         type: 'decision',
-        html: '<h2>Context</h2><p>The ledger service handles both posting and balance queries. During the 9.9 sale, balance reads slowed down posting for every payment. Ledger balances already change only through events from the payments topic [1], so posting and reading can be separated without changing how money moves.</p><h2>Decision</h2><p>Split the ledger into a <b>posting service</b> that consumes payment events and a <b>balance query service</b> that serves reads from its own projection. Retries stay safe: every POST to a payment API carries an Idempotency-Key header [2], and the gateway replays the first response for 24 hours [3].</p><h2>Consequences</h2><ul><li>Balance reads become eventually consistent, typically within a second.</li><li>The posting service can scale independently during peak sales.</li><li>Reconciliation must compare the projection with posted events daily.</li></ul>',
+        html: '<h2>Context</h2><p>The ledger service handles both posting and balance queries. During the 9.9 sale, balance reads slowed down posting for every payment. Ledger balances already change only through events from the payments event stream [1], so posting and reading can be separated without changing how money moves.</p><h2>Decision</h2><p>Split the ledger into a <b>posting service</b> that consumes payment events and a <b>balance query service</b> that serves reads from its own projection. Retries stay safe: every POST to a payment API carries an Idempotency-Key header [2], and the gateway replays the first response for 24 hours [3].</p><h2>Consequences</h2><ul><li>Balance reads become eventually consistent, typically within a second.</li><li>The posting service can scale independently during peak sales.</li><li>Reconciliation must compare the projection with posted events daily.</li></ul>',
         cites: [cite('fx-eng-adr027', 1, Q.ledger), cite('fx-eng-adr031', 1, Q.idemKey), cite('fx-eng-adr031', 2, Q.idemReplay)],
       },
     },
@@ -531,7 +535,7 @@ seedWorkspace('ws-finx', () => {
     { id: 'fx-c5', owner: 'u-fx-khoa', title: 'ADR-031 and idempotency', at: P(2), scope: ['kb-fx-eng'], space: 'sp-cbm', messages: [
       { id: 'fx-m9', role: 'user', text: 'What does ADR-031 say about idempotency?' },
       { id: 'fx-m10', role: 'assistant', activity: [{ kind: 'search', label: 'Searched Engineering Handbook & Architecture', detail: '2 searches · 3 relevant passages' }],
-        text: 'ADR-031 makes idempotency mandatory: **every POST to a payment API must carry an `Idempotency-Key` header** [1]. The gateway **stores the first response for 24 hours** and **replays it for any retry with the same key** [2], so a client that times out can retry without paying twice.\n\nIt works together with ADR-027: ledger balances change **only by consuming events from the payments topic**, never by direct writes [3].',
+        text: 'ADR-031 makes idempotency mandatory: **every POST to a payment API must carry an `Idempotency-Key` header** [1]. The gateway **stores the first response for 24 hours** and **replays it for any retry with the same key** [2], so a client that times out can retry without paying twice.\n\nIt works together with ADR-027: ledger balances change **only by consuming events from the payments event stream**, never by direct writes [3].',
         citations: [
           { n: 1, item: 'fx-eng-adr031', highlights: [{ pageNumber: 1 }], quote: Q.idemKey },
           { n: 2, item: 'fx-eng-adr031', highlights: [{ pageNumber: 2 }], quote: Q.idemReplay },

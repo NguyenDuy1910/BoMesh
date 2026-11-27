@@ -69,6 +69,70 @@ _HELPERS = (
     END;
     $$ LANGUAGE plpgsql
     """,
+    # Like bomesh_require_same_tenant, but a NULL tenant (a platform template)
+    # matches only NULL-tenant rows.
+    """
+    CREATE OR REPLACE FUNCTION bomesh_require_same_scope() RETURNS trigger AS $$
+    DECLARE
+      v_row jsonb := to_jsonb(NEW);
+      v_tenant uuid := (v_row ->> TG_ARGV[0])::uuid;
+      v_reference uuid;
+      v_found boolean;
+      v_index int := 1;
+    BEGIN
+      WHILE v_index < TG_NARGS LOOP
+        v_reference := (v_row ->> TG_ARGV[v_index])::uuid;
+        IF v_reference IS NOT NULL THEN
+          EXECUTE 'SELECT EXISTS (SELECT 1 FROM ' || quote_ident(TG_ARGV[v_index + 1])
+            || ' WHERE id = $1 AND tenant_id IS NOT DISTINCT FROM $2)'
+            INTO v_found USING v_reference, v_tenant;
+          IF NOT v_found THEN
+            RAISE EXCEPTION USING MESSAGE = TG_TABLE_NAME || '.' || TG_ARGV[v_index]
+              || ' must reference ' || TG_ARGV[v_index + 1] || ' of the same tenant';
+          END IF;
+        END IF;
+        v_index := v_index + 2;
+      END LOOP;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    # A concept of a tenant's scheme of the given purpose.
+    """
+    CREATE OR REPLACE FUNCTION bomesh_is_scheme_concept(p_concept uuid, p_tenant uuid, p_purpose text)
+    RETURNS boolean LANGUAGE sql STABLE AS $$
+      SELECT EXISTS (
+        SELECT 1 FROM concepts c JOIN concept_schemes s ON s.id = c.scheme_id
+        WHERE c.id = p_concept AND c.tenant_id = p_tenant AND s.purpose = p_purpose
+      )
+    $$
+    """,
+    # I11: accepted whole-document labels of one (Document, scheme) respect
+    # max_labels and, when the scheme has a primary, carry exactly one.
+    """
+    CREATE OR REPLACE FUNCTION bomesh_check_item_scheme_labels(p_item uuid, p_scheme uuid)
+    RETURNS void AS $$
+    DECLARE
+      v_max smallint;
+      v_has_primary boolean;
+      v_count int;
+      v_primaries int;
+    BEGIN
+      SELECT max_labels, has_primary INTO v_max, v_has_primary
+      FROM concept_schemes WHERE id = p_scheme;
+      SELECT count(*), count(*) FILTER (WHERE is_primary) INTO v_count, v_primaries
+      FROM item_concepts
+      WHERE item_id = p_item AND scheme_id = p_scheme
+        AND state = 'accepted' AND section_ref IS NULL;
+      IF v_max IS NOT NULL AND v_count > v_max THEN
+        RAISE EXCEPTION 'a Document carries at most max_labels accepted labels of a scheme';
+      END IF;
+      IF v_has_primary AND v_count > 0 AND v_primaries <> 1 THEN
+        RAISE EXCEPTION 'a Document carries exactly one primary label of this scheme';
+      END IF;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
 )
 
 
@@ -347,55 +411,6 @@ END;
 """,
     ),
     _Trigger(
-        table="topics",
-        name="parent",
-        events="INSERT OR UPDATE OF tenant_id, parent_topic_id",
-        body="""
-BEGIN
-  IF NEW.parent_topic_id IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM topics
-    WHERE id = NEW.parent_topic_id AND tenant_id = NEW.tenant_id AND kind = 'domain'
-  ) THEN
-    RAISE EXCEPTION 'a topic parent must be a domain of the same tenant';
-  END IF;
-  RETURN NEW;
-END;
-""",
-    ),
-    _Trigger(
-        table="item_topics",
-        name="references",
-        events="INSERT OR UPDATE OF item_id, topic_id",
-        body="""
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM items i JOIN topics t ON t.tenant_id = i.tenant_id
-    WHERE i.id = NEW.item_id AND i.item_kind = 'document'
-      AND t.id = NEW.topic_id AND t.state = 'active' AND t.deleted_at IS NULL
-  ) THEN
-    RAISE EXCEPTION 'an Item topic tags a Document with an active topic of its tenant';
-  END IF;
-  RETURN NEW;
-END;
-""",
-    ),
-    _Trigger(
-        table="contribution_topics",
-        name="same_tenant",
-        events="INSERT OR UPDATE OF contribution_id, topic_id",
-        body="""
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM contributions c JOIN topics t ON t.tenant_id = c.tenant_id
-    WHERE c.id = NEW.contribution_id AND t.id = NEW.topic_id
-  ) THEN
-    RAISE EXCEPTION 'a contribution topic must belong to the contribution tenant';
-  END IF;
-  RETURN NEW;
-END;
-""",
-    ),
-    _Trigger(
         table="item_shortcuts",
         name="references",
         events="INSERT OR UPDATE OF tenant_id, collection_item_id, target_item_id, deleted_at",
@@ -486,74 +501,6 @@ END;
     ),
     _same_tenant("saved_items", "tenant_id", ("item_id", "items")),
     _same_tenant("recent_items", "tenant_id", ("item_id", "items")),
-    _Trigger(
-        table="topic_corrections",
-        name="references",
-        events="INSERT OR UPDATE OF tenant_id, item_id, actor_user_id",
-        body="""
-BEGIN
-  IF NOT bomesh_is_item(NEW.item_id, NEW.tenant_id, 'document') THEN
-    RAISE EXCEPTION 'Topic Correction item must be a Document of its tenant';
-  END IF;
-  IF (TG_OP = 'INSERT' OR NEW.actor_user_id IS DISTINCT FROM OLD.actor_user_id
-      OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id)
-     AND NOT bomesh_is_active_member(NEW.actor_user_id, NEW.tenant_id) THEN
-    RAISE EXCEPTION 'Topic Correction actor must be an active member of its tenant';
-  END IF;
-  RETURN NEW;
-END;
-""",
-    ),
-    _Trigger(
-        table="topic_correction_changes",
-        name="same_tenant",
-        events="INSERT OR UPDATE OF topic_correction_id, topic_id",
-        body="""
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM topic_corrections c JOIN topics t ON t.tenant_id = c.tenant_id
-    WHERE c.id = NEW.topic_correction_id AND t.id = NEW.topic_id
-  ) THEN
-    RAISE EXCEPTION 'a Topic Correction change must reference a Topic of the correction tenant';
-  END IF;
-  RETURN NEW;
-END;
-""",
-    ),
-    # A correction records at least one changed topic: checked at commit, after the
-    # correction and its change rows are all written (or the correction is deleted).
-    _Trigger(
-        table="topic_corrections",
-        name="has_changes",
-        events="INSERT",
-        deferred=True,
-        function="bomesh_require_topic_correction_change",
-        body="""
-DECLARE
-  v_correction uuid;
-BEGIN
-  IF TG_TABLE_NAME = 'topic_corrections' THEN
-    v_correction := NEW.id;
-  ELSE
-    v_correction := OLD.topic_correction_id;
-  END IF;
-  IF EXISTS (SELECT 1 FROM topic_corrections WHERE id = v_correction)
-     AND NOT EXISTS (
-       SELECT 1 FROM topic_correction_changes WHERE topic_correction_id = v_correction
-     ) THEN
-    RAISE EXCEPTION 'a Topic Correction records at least one topic change';
-  END IF;
-  RETURN NULL;
-END;
-""",
-    ),
-    _Trigger(
-        table="topic_correction_changes",
-        name="has_changes",
-        events="DELETE OR UPDATE OF topic_correction_id",
-        deferred=True,
-        function="bomesh_require_topic_correction_change",
-    ),
     _same_tenant("knowledge_gap_decisions", "tenant_id", ("resolved_by_item_id", "items")),
     _Trigger(
         table="role_assignments",
@@ -855,6 +802,365 @@ END;
 )
 
 
+#: The faceted taxonomy (``item_model.md`` §4.13). A template row has a
+#: NULL tenant and references only template rows.
+_TAXONOMY_TRIGGERS = (
+    _Trigger(
+        table="concept_schemes",
+        name="template",
+        events="INSERT OR UPDATE OF tenant_id, template_scheme_id",
+        body="""
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.tenant_id IS DISTINCT FROM OLD.tenant_id THEN
+    RAISE EXCEPTION 'a Concept Scheme tenant is immutable';
+  END IF;
+  IF NEW.template_scheme_id IS NOT NULL AND (NEW.tenant_id IS NULL OR NOT EXISTS (
+    SELECT 1 FROM concept_schemes WHERE id = NEW.template_scheme_id AND tenant_id IS NULL
+  )) THEN
+    RAISE EXCEPTION 'a workspace Concept Scheme forks a platform template';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # I5 (notation immutable), I9 (color only on a top concept), same tenant.
+    _Trigger(
+        table="concepts",
+        name="references",
+        events="INSERT OR UPDATE OF tenant_id, scheme_id, notation, color, template_concept_id",
+        body="""
+BEGIN
+  IF TG_OP = 'UPDATE' AND (
+    NEW.notation <> OLD.notation OR NEW.scheme_id <> OLD.scheme_id
+    OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+  ) THEN
+    RAISE EXCEPTION 'a Concept notation, scheme and tenant are immutable';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM concept_schemes
+    WHERE id = NEW.scheme_id AND tenant_id IS NOT DISTINCT FROM NEW.tenant_id
+  ) THEN
+    RAISE EXCEPTION 'a Concept belongs to a Concept Scheme of its tenant';
+  END IF;
+  IF NEW.template_concept_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM concepts WHERE id = NEW.template_concept_id AND tenant_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'a Concept forks a platform template Concept';
+  END IF;
+  IF NEW.color IS NOT NULL AND EXISTS (
+    SELECT 1 FROM concept_relations
+    WHERE source_concept_id = NEW.id AND kind = 'broader'
+  ) THEN
+    RAISE EXCEPTION 'only a top Concept has a color';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # Same scheme; I3 (no broader cycle, multi-parent included); I9.
+    _Trigger(
+        table="concept_relations",
+        name="graph",
+        events="INSERT OR UPDATE",
+        body="""
+DECLARE
+  v_source record;
+  v_target_scheme uuid;
+BEGIN
+  SELECT scheme_id, color INTO v_source FROM concepts WHERE id = NEW.source_concept_id;
+  SELECT scheme_id INTO v_target_scheme FROM concepts WHERE id = NEW.target_concept_id;
+  IF v_source.scheme_id IS DISTINCT FROM v_target_scheme THEN
+    RAISE EXCEPTION 'related Concepts belong to the same scheme';
+  END IF;
+  IF NEW.kind = 'broader' THEN
+    IF v_source.color IS NOT NULL THEN
+      RAISE EXCEPTION 'only a top Concept has a color';
+    END IF;
+    IF EXISTS (
+      WITH RECURSIVE up(id) AS (
+        SELECT NEW.target_concept_id
+        UNION
+        SELECT r.target_concept_id FROM concept_relations r JOIN up ON r.source_concept_id = up.id
+        WHERE r.kind = 'broader'
+      )
+      SELECT 1 FROM up WHERE id = NEW.source_concept_id
+    ) THEN
+      RAISE EXCEPTION 'broader cycle detected';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="concept_replacements",
+        name="same_scheme",
+        events="INSERT OR UPDATE",
+        body="""
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM concepts c JOIN concepts r ON r.scheme_id = c.scheme_id
+    WHERE c.id = NEW.concept_id AND r.id = NEW.replacement_concept_id
+  ) THEN
+    RAISE EXCEPTION 'a replacement Concept belongs to the same scheme';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="concept_group_members",
+        name="same_scheme",
+        events="INSERT OR UPDATE",
+        body="""
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM concept_groups g JOIN concepts c ON c.scheme_id = g.scheme_id
+    WHERE g.id = NEW.group_id AND c.id = NEW.concept_id
+  ) THEN
+    RAISE EXCEPTION 'a Concept Group member belongs to the group scheme';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="concept_rules",
+        name="references",
+        events=(
+            "INSERT OR UPDATE OF tenant_id, when_concept_id, when_collection_item_id, "
+            "when_ingestion_source_id, then_concept_id"
+        ),
+        body="""
+BEGIN
+  IF NOT bomesh_is_scheme_concept(NEW.then_concept_id, NEW.tenant_id, 'classification') THEN
+    RAISE EXCEPTION 'a Concept Rule implies a classification Concept of its tenant';
+  END IF;
+  IF NEW.when_concept_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM concepts WHERE id = NEW.when_concept_id AND tenant_id = NEW.tenant_id
+  ) THEN
+    RAISE EXCEPTION 'a Concept Rule condition is a Concept of its tenant';
+  END IF;
+  IF NEW.when_collection_item_id IS NOT NULL
+     AND NOT bomesh_is_item(NEW.when_collection_item_id, NEW.tenant_id, 'collection') THEN
+    RAISE EXCEPTION 'a Concept Rule condition is a Collection of its tenant';
+  END IF;
+  IF NEW.when_ingestion_source_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM ingestion_sources
+    WHERE id = NEW.when_ingestion_source_id AND tenant_id = NEW.tenant_id
+  ) THEN
+    RAISE EXCEPTION 'a Concept Rule condition is an Ingestion Source of its tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="concept_proposals",
+        name="references",
+        events=(
+            "INSERT OR UPDATE OF tenant_id, scheme_id, broader_concept_id, "
+            "target_concept_id, concept_id"
+        ),
+        body="""
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM concept_schemes WHERE id = NEW.scheme_id AND tenant_id = NEW.tenant_id
+  ) THEN
+    RAISE EXCEPTION 'a Concept Proposal targets a Concept Scheme of its tenant';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM unnest(ARRAY[NEW.broader_concept_id, NEW.target_concept_id, NEW.concept_id])
+      AS reference(id)
+    WHERE reference.id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM concepts WHERE id = reference.id AND scheme_id = NEW.scheme_id
+    )
+  ) THEN
+    RAISE EXCEPTION 'a Concept Proposal references Concepts of its scheme';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="concept_proposal_items",
+        name="same_tenant",
+        events="INSERT OR UPDATE",
+        body="""
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM concept_proposals p JOIN items i ON i.tenant_id = p.tenant_id
+    WHERE p.id = NEW.proposal_id AND i.id = NEW.item_id AND i.item_kind = 'document'
+  ) THEN
+    RAISE EXCEPTION 'a Concept Proposal item is a Document of the proposal tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # I10: a new label targets a published, assignable Concept of a
+    # classification scheme of the Document's tenant.
+    _Trigger(
+        table="item_concepts",
+        name="references",
+        events="INSERT OR UPDATE OF item_id, concept_id, scheme_id",
+        body="""
+DECLARE
+  v_tenant uuid;
+  v_concept record;
+  v_scheme record;
+BEGIN
+  SELECT tenant_id INTO v_tenant FROM items WHERE id = NEW.item_id AND item_kind = 'document';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'an Item Concept labels a Document';
+  END IF;
+  SELECT * INTO v_concept FROM concepts WHERE id = NEW.concept_id;
+  IF v_concept.tenant_id IS DISTINCT FROM v_tenant THEN
+    RAISE EXCEPTION 'an Item Concept references a Concept of the Document tenant';
+  END IF;
+  IF v_concept.scheme_id <> NEW.scheme_id THEN
+    RAISE EXCEPTION 'an Item Concept scheme is its Concept scheme';
+  END IF;
+  SELECT * INTO v_scheme FROM concept_schemes WHERE id = NEW.scheme_id;
+  IF v_scheme.purpose <> 'classification' THEN
+    RAISE EXCEPTION 'only Concepts of a classification scheme label Documents';
+  END IF;
+  IF TG_OP = 'INSERT' OR NEW.concept_id <> OLD.concept_id THEN
+    IF v_concept.state <> 'published' OR v_concept.deleted_at IS NOT NULL THEN
+      RAISE EXCEPTION 'an Item Concept targets a published Concept';
+    END IF;
+    IF NOT v_scheme.assign_top_concepts AND NOT EXISTS (
+      SELECT 1 FROM concept_relations
+      WHERE source_concept_id = NEW.concept_id AND kind = 'broader'
+    ) THEN
+      RAISE EXCEPTION 'top Concepts of this scheme are not assignable';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    # I11, checked at commit: a label swap writes several rows.
+    _Trigger(
+        table="item_concepts",
+        name="cardinality",
+        events="INSERT OR UPDATE OR DELETE",
+        deferred=True,
+        body="""
+BEGIN
+  IF TG_OP <> 'DELETE' THEN
+    PERFORM bomesh_check_item_scheme_labels(NEW.item_id, NEW.scheme_id);
+  END IF;
+  IF TG_OP <> 'INSERT' THEN
+    PERFORM bomesh_check_item_scheme_labels(OLD.item_id, OLD.scheme_id);
+  END IF;
+  RETURN NULL;
+END;
+""",
+    ),
+    _Trigger(
+        table="item_classifications",
+        name="references",
+        events="INSERT OR UPDATE OF item_id, scheme_id",
+        body="""
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM items i JOIN concept_schemes s ON s.tenant_id = i.tenant_id
+    WHERE i.id = NEW.item_id AND i.item_kind = 'document'
+      AND s.id = NEW.scheme_id AND s.purpose = 'classification'
+  ) THEN
+    RAISE EXCEPTION 'an Item Classification is of a Document and a classification scheme of its tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="document_profiles",
+        name="references",
+        events="INSERT OR UPDATE OF item_id, issuer_concept_id, campus_concept_id",
+        body="""
+DECLARE
+  v_tenant uuid;
+BEGIN
+  SELECT tenant_id INTO v_tenant FROM items WHERE id = NEW.item_id AND item_kind = 'document';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'only Document Items have a profile';
+  END IF;
+  IF (NEW.issuer_concept_id IS NOT NULL
+      AND NOT bomesh_is_scheme_concept(NEW.issuer_concept_id, v_tenant, 'authority'))
+     OR (NEW.campus_concept_id IS NOT NULL
+      AND NOT bomesh_is_scheme_concept(NEW.campus_concept_id, v_tenant, 'authority')) THEN
+    RAISE EXCEPTION 'a Document issuer and campus are authority Concepts of its tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="document_applicability",
+        name="references",
+        events="INSERT OR UPDATE",
+        body="""
+DECLARE
+  v_tenant uuid;
+BEGIN
+  SELECT tenant_id INTO v_tenant FROM items WHERE id = NEW.item_id AND item_kind = 'document';
+  IF NOT FOUND OR NOT bomesh_is_scheme_concept(NEW.concept_id, v_tenant, 'authority') THEN
+    RAISE EXCEPTION 'a Document applies to authority Concepts of its tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="document_supersessions",
+        name="references",
+        events="INSERT OR UPDATE",
+        body="""
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM items i JOIN items s ON s.tenant_id = i.tenant_id
+    WHERE i.id = NEW.item_id AND s.id = NEW.superseded_item_id
+      AND i.item_kind = 'document' AND s.item_kind = 'document'
+  ) THEN
+    RAISE EXCEPTION 'a Document supersedes a Document of its tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+    _Trigger(
+        table="member_affiliations",
+        name="references",
+        events="INSERT OR UPDATE OF tenant_id, concept_id",
+        body="""
+BEGIN
+  IF NOT bomesh_is_scheme_concept(NEW.concept_id, NEW.tenant_id, 'authority') THEN
+    RAISE EXCEPTION 'a Member affiliation is an authority Concept of its tenant';
+  END IF;
+  RETURN NEW;
+END;
+""",
+    ),
+)
+
+#: Views, created after the tables and dropped before them.
+_VIEWS = {
+    # W2: labels of published Concepts shared by several schemes of a tenant.
+    "cross_scheme_labels": """
+    CREATE OR REPLACE VIEW cross_scheme_labels AS
+    SELECT c.tenant_id, l.normalized,
+           array_agg(DISTINCT c.scheme_id) AS scheme_ids,
+           array_agg(DISTINCT c.id) AS concept_ids
+    FROM concept_labels l JOIN concepts c ON c.id = l.concept_id
+    WHERE c.state = 'published'
+    GROUP BY c.tenant_id, l.normalized
+    HAVING count(DISTINCT c.scheme_id) > 1
+    """,
+}
+
+
 def _create_file_class_function(_metadata: MetaData, connection: Connection, **_: Any) -> None:
     """``bomesh_file_class``: the Document file-class rule, generated from the format registry.
 
@@ -872,9 +1178,16 @@ def install(metadata: MetaData) -> None:
 
     event.listen(metadata, "after_create", _create_file_class_function)
     statements = [*_HELPERS]
-    for trigger in _TRIGGERS:
+    for trigger in (*_TRIGGERS, *_TAXONOMY_TRIGGERS):
         statements.extend(trigger.statements())
+    statements.extend(_VIEWS.values())
     for statement in statements:
         event.listen(
             metadata, "after_create", DDL(statement).execute_if(dialect="postgresql")
+        )
+    for view in _VIEWS:
+        event.listen(
+            metadata,
+            "before_drop",
+            DDL(f"DROP VIEW IF EXISTS {view}").execute_if(dialect="postgresql"),
         )

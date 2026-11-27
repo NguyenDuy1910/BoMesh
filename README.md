@@ -176,7 +176,7 @@ make help              # every target
 make services          # start PostgreSQL, Qdrant, Gotenberg and RustFS
 make reset-all         # wipe PostgreSQL, Qdrant and RustFS volumes, rebuild, reseed (also run by make init)
 make db-reset          # rebuild PostgreSQL only and reseed
-make seed              # (re)seed both workspaces, the role-matrix accounts and HCM-UTE's topics and folders
+make seed              # (re)seed both workspaces, the role-matrix accounts, the university taxonomy and HCM-UTE's folders
 make qdrant-init       # recreate the Qdrant collection and its payload indexes
 make status            # dependency state and API health
 ```

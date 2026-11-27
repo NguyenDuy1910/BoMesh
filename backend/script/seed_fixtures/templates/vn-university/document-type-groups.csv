@@ -1,0 +1,6 @@
+code,name,position,queryExpansion,members
+van-ban-quan-ly,Văn bản quản lý,1,false,quy-che|quy-dinh|quyet-dinh|huong-dan|ke-hoach|thong-bao|cong-van|bao-cao|bien-ban|to-trinh|bieu-mau
+hoc-thuat,Học thuật,2,false,chuong-trinh-dao-tao|de-cuong-hoc-phan|giao-trinh|de-thi
+nghien-cuu,Nghiên cứu & công trình,3,false,bai-bao|luan-van|do-an|bao-cao-de-tai
+thong-tin,Thông tin & hỗ trợ,4,false,so-tay|hoi-dap|tin-tuc
+quy-pham,"Quy chế, quy định & hướng dẫn",5,true,quy-che|quy-dinh|huong-dan

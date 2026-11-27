@@ -8,6 +8,7 @@ import { ProgressBar, Tip, toast } from "@/components/ui";
 import { errorMessage } from "@/lib/api/client";
 import { fmtNum, plural } from "@/lib/format";
 import { useKnowledgeModel } from "@/modules/knowledge/queries";
+import { conceptLabel } from "@/modules/knowledge/taxonomy";
 
 import { cancelIngestionRun, getIngestionRun, type IngestionRun } from "../api";
 import { docsHref } from "../model";
@@ -23,7 +24,7 @@ export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
   const router = useRouter();
   const runs = useActiveRuns();
   const invalidate = useInvalidateCuration();
-  const { ctx } = useKnowledgeModel();
+  const { taxonomy } = useKnowledgeModel();
   const [stopping, setStopping] = useState(false);
   const seen = useRef<readonly string[] | null>(null);
   const stopped = useRef(new Set<string>());
@@ -56,10 +57,10 @@ export function ProcessingStrip({ showThem = true }: { showThem?: boolean }) {
   const failed = c.failedCount ?? 0;
   const where = [`${fmtNum(done)} đã xử lý`, c.runningCount ? `${fmtNum(c.runningCount)} đang xử lý` : "", c.queuedCount ? `${fmtNum(c.queuedCount)} đang chờ` : "", failed ? `${fmtNum(failed)} lỗi` : ""].filter(Boolean);
   const pct = Math.round(((done + failed) / Math.max(1, total)) * 100);
-  const topics = run.classification?.topics ?? [];
+  const concepts = run.classification?.concepts ?? [];
   const note = run.classification?.note ?? "";
-  const context = topics.length ? `Đang phân loại theo ${plural(topics.length, "topic")} bạn đã chọn${note ? ", kèm ngữ cảnh của bạn" : ""}` : note ? "Đang phân loại kèm ngữ cảnh của bạn" : "";
-  const contextTip = topics.length ? topics.map((t) => ctx.topicNames?.get(t) ?? "Chủ đề chưa đặt tên").join(", ") : note;
+  const context = concepts.length ? `Đang phân loại theo ${plural(concepts.length, "concept")} bạn đã chọn${note ? ", kèm ngữ cảnh của bạn" : ""}` : note ? "Đang phân loại kèm ngữ cảnh của bạn" : "";
+  const contextTip = concepts.length ? concepts.map((c) => conceptLabel(taxonomy, c)).join(", ") : note;
 
   const stop = async () => {
     const name = run.name ?? "";

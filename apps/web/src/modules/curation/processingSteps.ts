@@ -4,7 +4,7 @@ import type { ProcessingKey } from "./lifecycle";
 /**
  * A document's processing steps (preview `PROC_STEPS` / `procSteps` in core/lifecycle.js): an ingestion run task's
  * `phases` (document_contract.md "Processing") grouped into the five steps people read. A step the task went past
- * without entering (no topics to choose among, contextual retrieval off) was skipped.
+ * without entering (no published concepts to choose among, contextual retrieval off) was skipped.
  */
 
 type Phase = NonNullable<IngestionTask["phase"]>;
@@ -29,7 +29,13 @@ export const PROC_STEPS: readonly ProcStep[] = [
     desc: "Mở tệp và tách thành các đoạn",
     ocrDesc: "Mở tệp, nhận dạng chữ (OCR) và tách thành các đoạn",
   },
-  { id: "classify", label: "Phân loại", phases: ["CLASSIFYING"], desc: "Chọn chủ đề trong các chủ đề ứng viên", skipped: "Bỏ qua: không có chủ đề để chọn" },
+  {
+    id: "classify",
+    label: "Phân loại",
+    phases: ["CLASSIFYING"],
+    desc: "Xếp tài liệu vào khái niệm của từng trục phân loại và đọc thông tin văn bản",
+    skipped: "Bỏ qua: chưa có khái niệm đã công bố để chọn",
+  },
   { id: "context", label: "Thêm ngữ cảnh", phases: ["CHUNKING"], desc: "Gắn ngữ cảnh của tài liệu cho từng đoạn", skipped: "Bỏ qua: đang tắt truy xuất theo ngữ cảnh" },
   { id: "embed", label: "Cho phép tra cứu", phases: ["EMBEDDING"], desc: "Chuyển các đoạn thành vector để tìm kiếm" },
   { id: "index", label: "Lập chỉ mục", phases: ["INDEXING"], desc: "Lưu lại để tìm kiếm và trợ lý tìm thấy" },

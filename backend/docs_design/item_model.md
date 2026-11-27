@@ -25,7 +25,7 @@ documents described and what the pre-review API draft proposed.
 
 UX (`apps/ux_preview/docs/KNOWLEDGE_HUB.md:22-33`, `DOCUMENT_LIFECYCLE.md`):
 a document lives in exactly one knowledge base; saved, recent, spaces,
-featured and topics *reference* it and never grant access; review is separate from processing; no nested-folder UI exists yet.
+featured and concept labels *reference* it and never grant access; review is separate from processing; no nested-folder UI exists yet.
 
 ## 2. Problems found
 
@@ -72,6 +72,8 @@ Workspace (tenants)
  ├─ (hidden) COLLECTION type conversation_artifacts → Assistant `artifacts`
  │
  ├─ Contribution ──item──▶ candidate DOCUMENT ──target──▶ COLLECTION
+ ├─ ConceptScheme ── concepts ── labels / broader  (taxonomy, 4.13)
+ │    └─ item_concepts ──▶ DOCUMENT   (labels; never grant access)
  ├─ Space ── materials ──ref──▶ Item              (never grants access)
  ├─ Member ── savedItems / recentItems ──ref──▶ Item
  ├─ Source ──targetCollection──▶ COLLECTION; ExternalResource ──▶ DOCUMENT
@@ -88,6 +90,7 @@ Workspace (tenants)
 | Source / ExternalResource | provider scope and identity | unchanged | `ingestion_sources`, `external_resources` |
 | Ingestion run / task | one processing execution over a snapshot | unchanged | `ingestion_runs`, `ingestion_run_items` |
 | Citation | blocks (`refs`) of one Structured Document of one revision, with their quote and location | written with its message, review cell or request; never changed | `message_citations`, citation JSON of review cells and requests |
+| Concept scheme / Concept | a taxonomy axis and its concepts, labels and relations | concept `DRAFT → PUBLISHED → DEPRECATED`; scheme versions on publish | `concept_schemes`, `concepts`, `concept_labels`, `concept_relations`, `concept_scheme_versions` |
 | Item shortcut | shortcut of a Document inside another Collection | create / soft delete; follows the container's delete cohort | `item_shortcuts` (new) |
 | Artifact | assistant output and its revisions | Assistant domain | Item row in a hidden system collection + `item_revisions` |
 
@@ -177,7 +180,7 @@ A reviewer first processes a NEW_DOCUMENT candidate with an explicit Ingestion
 Run (Documents → Processing; `contributions.review` on the deciding collection
 is enough to name it in `items[]`). Its CLASSIFYING step matches rules against
 the target collection, not the contributor's PERSONAL one, and replaces the
-contribution's suggested topics, summary and title: the assistant classifies, the
+contribution's suggested concepts, summary and title: the assistant classifies, the
 reviewer decides. Approval requires that processing (`CANDIDATE_NOT_PROCESSED`
 otherwise; unsupported formats pass) and still never ingests: it moves the
 candidate into the target collection and publishes it, or publishes a source
@@ -280,10 +283,11 @@ are immutable (the tree trigger rejects a change).
   and the sync reports the resource as failed.
 
 The type is never a business taxonomy, an Artifact kind, a document purpose or
-a tenant setting: subject classification is topics. Rejected: a free-form
-document type with a per-workspace list of allowed values (an unchecked
-string beside topics, filtered and faceted like them, with no rule tying it to
-content); a separate discriminator for special Collections (a second
+a tenant setting: subject classification is the concept schemes (4.13).
+Rejected: a free-form document type with a per-workspace list of allowed
+values (an unchecked string beside the concept schemes, filtered and faceted
+like them, with no rule tying it to content); a separate discriminator for
+special Collections (a second
 discriminator the authorizer and triggers had to read beside the kind).
 
 **4.12 Merge re-points references.** `:merge {targetItem}` keeps one Document
@@ -295,10 +299,69 @@ the duplicate is soft-deleted and an `audit_logs` row (action `merge`, subject
 the duplicate, details `{target}`) records the merge. Reads never resolve
 merges, so there is no merge pointer column and no merged-from field. Undelete
 restores only the duplicate; the moved references stay on the kept Document.
-Historical rows (topic corrections, audit, notifications) keep naming the
+Historical rows (rejected `item_concepts`, audit, notifications) keep naming the
 duplicate. Rejected: a merge pointer on the duplicate resolved at read time
 (every reference read follows a chain, and readability is checked on a
 different Item than the one stored).
+
+**4.13 Taxonomy: faceted SKOS concept schemes.** Subject classification is a
+set of independent concept schemes per workspace (`concept_schemes`), forked
+from platform templates (`tenant_id` NULL). A *classification* scheme
+(domain, function, document type, audience) labels Documents; an *authority*
+scheme (org unit, program) supplies metadata values (issuer, applicability,
+member affiliation) and never labels. Each scheme carries its cardinality
+(`min_labels`, `max_labels`, `has_primary`), `max_depth`,
+`assign_top_concepts`, section labels, LLM policy and thresholds.
+
+- **Concepts** (`concepts`): `notation` is the immutable API ID, never reused;
+  `draft → published → deprecated` (+ `concept_replacements`); a never
+  published draft may be soft-deleted. **Labels** (`concept_labels`):
+  pref/alt/hidden per language, matched on `normalized` (diacritics kept;
+  accent-insensitive matching folds in code). **Relations**
+  (`concept_relations`): `broader` (poly-hierarchy) and `related`.
+- **Closure** (`concept_closure`): ancestor/descendant/shortest depth of the
+  *published* graph, rebuilt per scheme on publish; hierarchical filters and
+  facets roll up through it.
+- **Versions** (`concept_scheme_versions`): `:publish` validates, writes an
+  immutable snapshot (the classifier's and query mapper's only input), the
+  change list and the reclassification scope (`trigger_type = taxonomy` run).
+- **Assignments** (`item_concepts`): one row per (Document, concept, section)
+  with source, confidence, state (`suggested | accepted | rejected`), version
+  and evidence; `item_classifications` records the per-scheme outcome
+  (assigned, empty, uncertain, failed). Rules (`concept_rules`), groups,
+  mappings and proposals complete the model.
+- **Metadata**: `document_profiles` (issuer, number, dates, applicability),
+  `document_applicability`, `document_supersessions`; `member_affiliations`.
+
+| # | Invariant | Enforced by |
+| --- | --- | --- |
+| I1 | ≤ 1 prefLabel per language per concept | partial unique index |
+| I2 | pref/alt/hidden disjoint within a concept (`normalized`) | unique index |
+| I3 | no `broader` cycle, multiple parents included | trigger + publish validator |
+| I4 | `related` never joins an ancestor and descendant | publish validator |
+| I5 | `notation` unique in the scheme over every row, immutable | unique index + trigger |
+| I6 | depth ≤ `max_depth` | publish validator |
+| I7 | a published concept has a definition and a `vi` prefLabel | publish validator |
+| I8 | a deprecated concept has no live narrower; `replacedBy` is published, same scheme, acyclic | publish validator |
+| I9 | `color` only on top concepts | trigger (concept write and broader insert) |
+| I10 | labels target published concepts of a classification scheme of the Document's tenant; no top concept when `assign_top_concepts` is false | trigger |
+| I11 | accepted whole-document labels per scheme ≤ `max_labels`; exactly one primary when `has_primary` and any | deferred constraint trigger |
+
+| # | Warning (never blocks) | Raised by |
+| --- | --- | --- |
+| W1 | a label shared by two concepts of the same scheme | publish validator (`warnings`), ListSharedLabels |
+| W2 | a label shared across schemes (valid: queries resolve it by context) | view `cross_scheme_labels`, ListSharedLabels |
+| W3 | a classification scheme with fewer than 8 or more than 20 top concepts | publish validator |
+| W4 | a concept reviewers rejected ≥ 3 times in 90 days that has no `scope_note` | publish validator |
+
+An invalid or over-long `match_patterns` entry (RE2) is refused on write
+(`INVALID_ARGUMENT`), not warned.
+
+Every reference is same-tenant; template rows reference only template rows.
+Rejected: one `topics` tree (one axis cannot hold domain, function, type and
+audience at once, and their cardinalities differ); labels in `text[]` columns
+(no SKOS checks, no reverse lookup); a recursive CTE per query instead of the
+closure (facets over thousands of hits).
 
 ## 5. Database changes (`design.dbml`)
 
@@ -320,12 +383,12 @@ different Item than the one stored).
 | 14 | `contributions.external_version`; `ingestion_run_items.revision_number`, `error_class`; `ingestion_runs.trigger_type` `platform_retry`; `scope.item_ids` | review-first dedupe, mid-run revision changes, platform retry and error classes had no column | keep in JSON | nullable columns, extended value list | `Contribution.externalVersion`, `IngestionTask.revision`/`errorClass`, `trigger` |
 | 15 | `item_shortcuts` (new; first named `item_links`) | a Document can appear only under its one canonical parent | second `parent_item_id` (breaks breadcrumbs, inheritance, moves); copies (duplicate objects and embeddings); reuse a curated-list table (audience model, not in-tree) | new table; same-tenant/type trigger | ItemShortcut resource, `collection.shortcutCount` |
 | 16 | no `items.space_id`; Space ↔ Item only through `space_materials` | a Collection-to-Space column duplicated what a Collection material says, so "which Items belong to this space" had two answers | keep the column beside materials (two truths that drift) | none | `Space.collections` = its Collection materials; conversation `scope.spaces` resolves materials |
-| 17 | `topics`, `item_topics` (new); `metadata.topics` dropped | topic IDs sat in `metadata` with no topic table | `metadata.topics` array with a GIN index: no FK, MergeTopic rewrites every tagged document JSON, DeleteTopic "only when unused" and `documentCount` need a reverse scan, facets need an unnest per hit | new tables; a trigger keeps tags same-tenant and on Documents | Topic resource, `document.topics` filter and facet |
-| 18 | `contribution_topics` (new); `suggestions` keeps only confidences and non-topic suggestions | suggested/proposed topics lived in `suggestions` JSON | keep them in JSON: `Topic.evidence`, `inReviewCount`, `:accept` and `:merge` retagging all look up by topic | new table | `ContributionSuggestions.topics`/`proposedTopics`, `Topic.evidence` |
+| 17 | `topics`, `item_topics` — superseded by #39–#41 and #45, dropped | topic IDs sat in `metadata` with no topic table | — | dropped with the faceted taxonomy | Topic resource removed; `document.concepts` |
+| 18 | `contribution_topics` — superseded by #45, dropped; `suggestions` keeps only summary, title, collection and their confidences | suggested/proposed topics lived in `suggestions` JSON | — | dropped | `ContributionSuggestions` without topics |
 | 19 | `artifacts`, `artifact_source_items`, `evidence_review_cells` (new), keyed by the Artifact's Item; `item_revisions.author` replaces `conversation_id`/`request_id` | Artifact kind, owner, space, audience, sources and evidence review had no store | everything in `items.metadata`: kind/owner/space/audience are filter and authorization inputs, sources need FKs and the audience check, cells are written concurrently and regenerated one by one; a non-Item artifact table (would duplicate revisions, objects and purge) | new tables; the Item row, revisions and objects stay as before | Artifact (Work kinds), `evidenceReview`, ArtifactRevision `author` |
 | 20 | `code` on the client-ID resources (`database_architecture.md`) | client-chosen `{resource}Id` values had no column | use the uuid only (cannot honour client-chosen IDs) | new column, unique per parent | `{resource}Id` on Create |
-| 21 | `topics.keywords`, `synonyms`, `guidance`, `example_item_ids`, `rule_collection_ids`, `rule_source_codes` | CLASSIFYING read only a topic's name and description; admins had nowhere to say what recognises a topic | a `topic_signals` table (no identity or lifecycle of its own: always read and written whole with the topic); one `classification` JSONB (untyped; arrays of IDs lose their element type) | empty arrays / null for existing topics | Topic `keywords[]`, `synonyms[]`, `guidance`, `examples[]`, `rules[]`; ImportTopics |
-| 22 | `topic_corrections` (new) | a reviewer's change of the assistant's topics was lost, so nothing could suggest keywords from it | audit log rows (not listable by topic, no state); a column on `item_topics` (a correction outlives the tag set it changed) | new table, same-tenant trigger on the item | TopicCorrection resource |
+| 21 | `topics` classification signals — superseded by #40 (labels, `match_patterns`, `scope_note`, `examples`) and #42 (`concept_rules`) | CLASSIFYING read only a topic's name and description | — | dropped | Topic signals removed |
+| 22 | `topic_corrections` — superseded by #45 (`rejected` + `human` rows of `item_concepts`), dropped | a reviewer's change of the assistant's labels was lost | — | dropped | TopicCorrection resource removed |
 | 23 | `items.publication_state` (`published`/`unpublished`) → `items.is_published` boolean | a two-value axis stored as text: wider rows, string compares in every visibility predicate | keep the text values (room for a third value no design asks for) | one non-destructive upgrade (`published` → true); CHECK set exactly for documents | none (`document.publicationState` unchanged) |
 | 24 | `item_index_states` (new): `index_status`, `processed_version`, `indexed_revision_number`, `payload_dirty_at` moved off `items` | every processing step and payload sync rewrote the `items` row and moved `updated_at`, so processing changed `updateTime` and the etag and churned the widest table | keep on `items` and stop bumping `updated_at` (the row is still rewritten several times per run); derive from `ingestion_run_items` (filters and facets on `indexingState` need a per-row latest-task lookup, and UNSUPPORTED / `processed_version` still need a home) | 1:1 rows created by the AFTER INSERT trigger `trg_items_index_state`; existing values copied; a trigger rejects rows of Collections | none (`document.indexingState`, `indexedRevision` unchanged) |
 | 25 | `items.storage_key`, `mime_type`, `size_bytes` and `metadata.file_name`/`storage`/`preview`/`cover` dropped; `items.current_revision_id` (FK) added; `item_revisions.storage_key` → `content_id` (uuid) + `file_name`; cover moved to `item_revisions.exports.cover`; `item_uploads` gains `content_id`, `mime_type`, `size_bytes`, `file_name` | every content field existed twice (item and revision) and was kept equal by hand in five code paths; object keys were stored strings in three tables and two JSON documents (provider paths and file names inside keys); covers and representations had to compare a `source` key string to tell whether they were current | keep the copies and add CHECKs (still two writes per change); content-addressed keys (staging + copy for presigned uploads); store the key and only drop the copies (a stored key can still drift from its row) | `database_architecture.md` "Object storage": derived keys under `content/`, `derived/`, `assets/`, `exports/`; existing objects need a copy to the new keys (an upgrade script only for an environment that keeps data) | none (`document.mimeType`, `sizeBytes`, `fileName`, revisions unchanged) |
@@ -335,13 +398,24 @@ different Item than the one stored).
 | 29 | `items.item_type` (collection \| document) → `item_kind`; new `item_type` = classification scoped by kind (4.11); the special-Collection discriminator, the free-form document type column and its tenant settings list dropped | the structural kind was called a type, special Collections needed a second discriminator, and a free-form document type duplicated topics with nothing tying it to content | keep a second discriminator beside the kind; keep the document type with a tenant list | `(tenant_id, item_kind, item_type)` index; CHECKs on the collection types; immutability in the tree trigger; revision and upload triggers keep a Document's file class | `itemKind` (required on create), output-only `itemType`; the collection kind field, the document type field and its workspace list removed; filter/facet `itemType` |
 | 30 | `items.merged_into_item_id` dropped; MergeItem re-points references (4.12) | read-time resolution followed chains on every reference read | keep the pointer | none | the merge pointer and merged-from fields removed |
 | 31 | `items.archive_item_id`/`archive_path` → `item_uploads` | where uploaded bytes came from is a fact of the upload, not of the canonical Item | keep on `items` | CHECK both-or-neither; partial index on `archive_item_id` | none |
-| 32 | `topic_corrections.from_topic_ids`/`to_topic_ids`/`state`/`updated_at` → `topic_correction_changes (topic_correction_id, topic_id, change_type)` + `dismissed_at` | UUID arrays had no FK and no index for "corrections that added or removed this Topic"; the state duplicated the dismiss time | GIN indexes on the arrays (still no FK or same-tenant check) | new child table (PK correction + topic; index `(topic_id, change_type, topic_correction_id)`); a deferred trigger requires at least one change | none (`fromTopics` = removed, `toTopics` = added; `state` from `dismissed_at`) |
+| 32 | `topic_correction_changes` — superseded by #45, dropped | UUID arrays had no FK | — | dropped | none |
 | 33 | `messages.status`, `groups.status`, `group_memberships.status` dropped | each duplicated a timestamp (`superseded_at`, `deleted_at`) | keep them behind CHECKs | none | none |
 | 34 | name columns renamed to `<entity>_name` (`users.login_name`, `users.user_name`, `tenants.tenant_name`, `items.item_name`, …); `items.summary` folded into `description`; `artifacts.owner_user_id`, `created_at`, `updated_at` dropped (the Item's) | `display_name`/`title` on every table read ambiguously in joins; two description columns on one row; artifact owner and times duplicated the Item's | keep the names | none | none (`displayName`, `title`, `summary` unchanged) |
 | 35 | `message_citations.chunk_id`, `page`, `excerpt` → `revision_number`, `structure_version`, `refs`, `quote`, `location`, `page` (a `CitationTarget`; the same shape in `evidence_review_cells.citations`, `artifacts.evidence_review.synthesis_citations`, `requests.assistant_context.citations`); `citations` table dropped | a citation named a chunk id that every rechunk renumbered, so old answers opened the wrong passage or none; its geometry lived in a per-chunk `citations` table replaced at each indexing | a new citation-target table (a citation has no identity or lifecycle beyond its message: written with it, read whole with it); a jsonb column (`item_id` needs its FK and index for `citations.item:` and knowledge gaps); storing only `refs` and reading `quote`/`location` from object storage (an object read per cited document on every ListMessages) | columns replaced (local database rebuilt); `quote` and `location` are copies of an immutable target, so they never go stale | `Citation.revision`, `structureVersion`, `refs`, `quote`, `location`, `pageNumber`; `passage`, `excerpt`, ListPassages and GetPassage removed |
 | 36 | `item_revisions.exports.structure` (`StructureManifest`: `version`, `fingerprint`, `docling_schema`, `size_bytes`, `nodes`, `pictures`, `pages`) | the parse lived only in memory: every reprocess, agent read and artifact preview downloaded and parsed the original again, and nothing named the parse a citation pointed into | a Structured Document table (one row per content, the same lifecycle and read path as the revision's other derived products); a column on `items` (content belongs to the revision, and a rollback reuses it); storing the JSON in PostgreSQL (megabytes per document in the hot row; object storage serves immutable bytes) | jsonb key, no DDL; copied with `exports` when a revision reuses its `content_id` | `structureVersion` on Citation, ContentReference and ArtifactSnapshot; GetItemContent |
 | 37 | `item_revisions.exports.preview` (the artifact viewer's page-image manifest) and its `pages-v1/page-0001.webp` objects dropped; artifact revisions keep only `exports.structure` | a second renderer drew WebP page images of PDF artifacts while every document, artifacts included, is read from its Structured Document; two viewers of one file disagreed and the images were rendered on a request | keep page images for PDF artifacts | jsonb key no longer written or read; existing page objects go with their file's folder at purge | `ArtifactSnapshot.pageAssets` and `ItemPageAsset` removed; the viewer reads `structureVersion` with GetItemContent |
 | 38 | `message_citations.page` → `highlights jsonb` (the same key replaces `page` in the citation JSON of review cells, synthesis and request context) | a citation could only name the first page, and only when the parsed bytes were the shown bytes: DOCX, PPTX, HTML and spreadsheets opened with nothing marked, and a second rendering of the document (the Content view) stood in for the file | one row per region in a child table (a region has no identity or lifecycle of its own, is never filtered and is read whole with its citation); keeping `page` beside it (it is the first region's page) | column replaced; a stored page becomes `[{"page": n}]` (the page, no boxes), no page `[]` | `Citation.pageNumber` and `ContentReference.pageNumber` → `highlights[]` (`Highlight`: `pageNumber` + `boxes`, or `sheet` + `cellRange`) |
+| 39 | `concept_schemes` (new) | the taxonomy has several axes, each with its own cardinality, thresholds and depth | a `scheme` column on `topics` (no home for the scheme settings) | new table, very small; templates have `tenant_id` NULL | ConceptScheme resource |
+| 40 | `concepts` + `concept_labels` (new) | keywords are really labels (alt/hidden, per language); SKOS S14 (one prefLabel per language) and S13 (pref/alt/hidden disjoint) need checks, and lookup goes by `normalized` | `text[]` on the concept (no unique index, no reverse lookup) | ~2,000 label rows for one university | Concept resource |
+| 41 | `concept_relations` + `concept_closure` (new) | poly-hierarchy three levels deep, roll-up for filters and facets | a single `parent_id` (no multiple parents); a recursive CTE per query (expensive for facets) | closure of a few thousand rows, rebuilt only on publish | hierarchical `document.concepts` filter |
+| 42 | `concept_groups`, `concept_mappings`, `concept_rules` (new) | display groups and query expansion that never classify; closeMatch to MOET / ISCED-F codes; facet rules (T→F/A, unit→F, program→D) replacing topic rule collections and sources | pseudo-concepts (break "groups are never targets"); JSON columns or uuid arrays (no FK, no direction) | small | groups, mappings, ConceptRule resource |
+| 43 | `concept_scheme_versions` (new) | version, audit, diff, reclassification scope and the immutable input of the classifier and export | `audit_logs` only (cannot rebuild the published state) | one row per publish (~100 KB–1 MB) | ConceptSchemeVersion, `:publish` |
+| 44 | `concept_proposals` (+ `concept_proposal_items`) (new) | proposed concepts have their own lifecycle (open/accepted/rejected) and evidence documents | a `draft` concept (mixed into the tree, no evidence) | replaces PROPOSED topics and `contribution_topics.proposed` | ConceptProposal resource |
+| 45 | `item_concepts` (new) | each label needs confidence, source, review state, version, evidence and an optional section | columns on `item_topics` (PK `(item, topic)` cannot hold section labels or rejected history) | replaces `item_topics` and `contribution_topics`; `rejected` + `human` rows replace `topic_corrections*` | `document.concepts[]` |
+| 46 | `item_classifications` (new) | "nothing fits" (empty) must differ from "unsure" (pool); not derivable from `item_concepts` | none (the unclassified pool mixes with documents deliberately left empty) | one row per (document, scheme) | uncertain pool |
+| 47 | `document_profiles` (+ `document_applicability`, `document_supersessions`) (new) | typed, filterable issuance metadata written by processing without touching `items` | columns on `items` (processing rewrites the widest row and moves its etag); JSON on `items` (forbidden) | 1:1 like `item_index_states` | `document.issuance`, `document.applicability` |
+| 48 | `member_affiliations` (new) | boosting and excluding by program/cohort needs a user profile | derive from groups (groups have no program/cohort type) | personal data (`auth_contract.md`) | `Member.affiliation`, `:importAffiliations` |
+| 49 | `ingestion_runs.trigger_type` `taxonomy` | reclassification after a publish had no trigger value | reuse `api` (hides why the run exists) | extended value list | `IngestionRun.trigger` |
 
 No item column is a JSON document: every attribute is a typed column, the
 provider facts of a synced Document live in `external_resources.provider_data`
@@ -448,11 +522,11 @@ their document children → audit event.
 AVAILABLE; `ANALYZING`, rule suggestions and flags) → `IN_REVIEW`; while
 open the candidate cannot move, be deleted or change content → reviewer
 processes it: `CreateIngestionRun {items: [candidate]}` (CLASSIFYING rules
-against the target collection; on a current index the chosen topics,
+against the target collection; on a current index the suggested concepts,
 summary and title replace the contribution's suggestions) → reviewer
 (`contributions.review` + `items.publish` on target; NEW_DOCUMENT candidate
 processed, else `CANDIDATE_NOT_PROCESSED`) `:approve {etag,
-targetCollection, topics, summary, title}` → in one transaction the
+targetCollection, concepts, summary, title}` → in one transaction the
 candidate moves through the Move routine and becomes `PUBLISHED` (or a
 revision is appended) → contribution `APPROVED` → no run starts: a moved
 candidate keeps its current index (payload re-synced); an appended revision is
@@ -469,7 +543,7 @@ classification}` → invariant 10 → one `INSERT … SELECT` snapshot into
 an ingestion worker claims the QUEUED run (advisory lock; recovered and resumed
 by another worker if it dies) and processes it; each task records the revision it started from; on
 finish `item_index_states` (`index_status`, `processed_version`, `indexed_revision_number`) and the
-CLASSIFYING step's assistant-applied `item_topics` (`document_contract.md`
+CLASSIFYING step's machine `item_concepts` rows (`document_contract.md`
 "Processing") are written only if the item's current revision and governing
 collection are unchanged (else `pending` + dirty payload); retries are new runs
 over failed and cancelled tasks with the same classification. Runs never change
@@ -531,7 +605,7 @@ The contract is served under `/api/v1` on the new schema.
    `all_members`, `publishing_policy`, the contribution/ingestion columns,
    `item_revisions` (replacing `artifact_revisions`), the guarded
    `current_revision_id`, `contributions`, `item_shortcuts`, `saved_items`,
-   `recent_items`, `topic_correction_changes`, the partial indexes, the tree,
+   `recent_items`, the taxonomy tables (4.13), the partial indexes, the tree,
    revision and upload triggers and the tightened CHECKs. Upload creates revision 1; membership creates the
    PERSONAL collection.
 2. **Permissions and roles (done).** `bomesh/iam/catalog.py` replaced the

@@ -15,6 +15,8 @@ Key                                                                Holds
 ``workspaces/{workspace}/files/{content_id}/{product}-v{n}[/…]``   what is built from that file
 ``workspaces/{workspace}/branding/{kind}/{asset_id}``              the workspace logo, map background
 ``workspaces/{workspace}/exports/{operation_id}.csv``              a workspace export's CSV
+``workspaces/{workspace}/taxonomies/{scheme}/{version}/…``         what is built from a published
+                                                                   concept scheme version
 ``platform/exports/{operation_id}.csv``                            a platform export's CSV
 =================================================================  =====================================
 
@@ -38,6 +40,7 @@ PLATFORM = "platform"
 FILES = "files"
 BRANDING = "branding"
 EXPORTS = "exports"
+TAXONOMIES = "taxonomies"
 #: The object of a file's own bytes.
 ORIGINAL = "original"
 
@@ -59,9 +62,10 @@ TRANSCRIPT = "ocr"
 STRUCTURE = "structure"
 PICTURE = "images"
 #: The contextualization model's classification answers for a file, one part
-#: per reuse key (``classification-v1/{key}.json``: model, prompt, taxonomy,
-#: note and the document's part), so processing it again asks the model only
-#: when one of them changed.
+#: per reuse key (``classification-v2/{key}.json``: model, the request's
+#: fingerprint of scheme versions, rules and classifier, prompt, note and the
+#: document's part), so processing it again asks the model only when one of
+#: them changed.
 CLASSIFICATION = "classification"
 
 #: Branding kinds (``…/branding/{kind}/{id}``).
@@ -128,6 +132,26 @@ def export_key(workspace: str | None, operation_id: UUID) -> str:
     """The CSV of a finished export Operation; ``None`` is a platform export."""
 
     return f"{exports_prefix(workspace)}{_uuid(operation_id)}.csv"
+
+
+def taxonomy_cards_key(
+    workspace: str, scheme_code: str, version: int, embedding_model: str
+) -> str:
+    """The concept-card vectors of one published scheme version, per embedding model.
+
+    ``…/taxonomies/{scheme}/{version}/cards-{model}.json``; a version is
+    immutable, so the key is written once per embedding model.
+    """
+
+    if version < 1:
+        raise ValueError("a published scheme version starts at 1")
+    model = re.sub(r"[^a-z0-9._-]+", "-", embedding_model.lower()).strip("-._")
+    if not model:
+        raise ValueError(f"invalid embedding model in object key: {embedding_model!r}")
+    return (
+        f"{workspace_prefix(workspace)}{TAXONOMIES}/{_segment(scheme_code)}/{version}/"
+        f"cards-{_part(model)}.json"
+    )
 
 
 def export_operation_id(key: str) -> UUID | None:
@@ -220,6 +244,7 @@ __all__ = [
     "PLATFORM",
     "REPRESENTATION",
     "STRUCTURE",
+    "TAXONOMIES",
     "TRANSCRIPT",
     "WORKSPACES",
     "archive_member_content_id",
@@ -233,5 +258,6 @@ __all__ = [
     "file_prefix",
     "new_content_id",
     "source_content_id",
+    "taxonomy_cards_key",
     "workspace_prefix",
 ]

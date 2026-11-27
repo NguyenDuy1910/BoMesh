@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from bomesh.connector.protocol import Chunk, DocumentItem
@@ -23,6 +23,7 @@ from bomesh.document_index import (
     ItemPayloadState,
     sample_document_context,
 )
+from bomesh.document_index.contextualization import classify_chunks
 from bomesh.document_index._qdrant import _QdrantBackend
 from bomesh.document_index.payload import (
     _contextual_chunk_from_point,
@@ -187,13 +188,16 @@ class ItemIndex:
         collection_item_ids: tuple[str, ...],
         editable_collection_ids: tuple[str, ...],
         document_item_ids: tuple[str, ...] = (),
+        within_item_ids: tuple[str, ...] | None = None,
     ) -> list[ContextualChunk]:
         """Return the fused candidates of every query, within the access scope.
 
         A point matches when its collection is in ``collection_item_ids`` and
         it is published or its collection is in ``editable_collection_ids``, or
-        when its item is in ``document_item_ids``. Embedding and the vector
-        query share the search deadline: past it, :class:`TimeoutError`.
+        when its item is in ``document_item_ids``. ``within_item_ids`` narrows
+        that scope to those items (``None`` = no narrowing, empty = nothing): the
+        recall pass over the documents a query's concepts match. Embedding and
+        the vector query share the search deadline: past it, :class:`TimeoutError`.
         """
 
         normalized_queries = [" ".join(query.split()) for query in queries]
@@ -205,6 +209,8 @@ class ItemIndex:
         if not normalized_tenant_id:
             raise ValueError("tenant_id must not be empty")
         if not collection_item_ids and not document_item_ids:
+            return []
+        if within_item_ids is not None and not within_item_ids:
             return []
 
         async with asyncio.timeout(self._search_deadline_seconds):
@@ -219,6 +225,7 @@ class ItemIndex:
                     collection_item_ids=collection_item_ids,
                     editable_collection_ids=editable_collection_ids,
                     document_item_ids=document_item_ids,
+                    within_item_ids=within_item_ids,
                     limit=limit,
                     candidate_limit=max(limit, self._candidate_limit),
                 )
@@ -258,6 +265,16 @@ class ItemIndex:
             limit=limit,
         )
         return sorted(_normalise_points(points), key=lambda chunk: chunk.chunk_index)
+
+    async def get_item_chunks(self, *, tenant_id: str, chunks: Mapping[str, Collection[int]]) -> list[ContextualChunk]:
+        """The live chunks at the given ``chunk_index`` values of Items the caller was
+        authorized for, in one index read; per Item in source order."""
+
+        points = await self._backend.get_chunk_points(
+            tenant_id=_required_text(tenant_id, "tenant_id"),
+            chunks={item_id: sorted(set(indexes)) for item_id, indexes in chunks.items()},
+        )
+        return sorted(_normalise_points(points), key=lambda chunk: (chunk.item_id, chunk.chunk_index))
 
     async def remove_item_content(
         self,
@@ -310,12 +327,13 @@ class ItemIndex:
     async def classify_sample(
         self, *, title: str, text: str, request: ClassificationRequest
     ) -> DocumentClassification | None:
-        """CLASSIFYING of a sample document, exactly as processing does it:
-        settled rules first, else one call to the contextualization model.
-        ``None`` when the model is needed but contextualization is not configured."""
+        """CLASSIFYING of a sample document, exactly as processing does it: an
+        empty answer when the request asks the model nothing, else one call to
+        the contextualization model. ``None`` when the model is needed but
+        contextualization is not configured."""
 
-        if request.settled:
-            return DocumentClassification(topics=request.settled)
+        if not request.needs_model:
+            return DocumentClassification()
         if self._semantic_contextualizer is None:
             return None
         return await self._semantic_contextualizer.classify(
@@ -323,6 +341,64 @@ class ItemIndex:
             request=request,
             title=title,
         )
+
+    async def classify_document(
+        self,
+        item: DocumentItem,
+        chunks: Sequence[Chunk],
+        *,
+        classification: ClassificationRequest,
+        cache: ClassificationCache | None = None,
+        progress: IndexProgress | None = None,
+    ) -> DocumentClassification | None:
+        """Step 0 of indexing alone (classifyOnly runs): no contextualizing,
+        embedding or storing. ``None`` when the model is needed but not
+        configured, or the call failed."""
+
+        return await classify_chunks(
+            chunks,
+            item,
+            semantic_contextualizer=self._semantic_contextualizer,
+            classification=classification,
+            classification_cache=cache,
+            progress=progress,
+        )
+
+    @property
+    def embedder(self) -> EmbeddingService | None:
+        """The index's embedding service; ``None`` when not configured."""
+
+        return self._embedder
+
+    async def nearest_items(
+        self,
+        probe: str,
+        vector: list[float],
+        *,
+        tenant_id: str,
+        document_item_ids: tuple[str, ...],
+        limit: int,
+    ) -> list[ContextualChunk]:
+        """The chunks of ``document_item_ids`` nearest to ``probe`` (its text, for
+        BM25) and ``vector`` (its dense embedding), fused; ``[]`` without ids."""
+
+        if not document_item_ids:
+            return []
+        if limit < 1:
+            raise ValueError("limit must be at least one")
+        normalized_probe = " ".join(probe.split())
+        if not normalized_probe:
+            raise ValueError("probe must not be empty")
+        points = await self._backend.search_item_points(
+            queries=[(normalized_probe, vector)],
+            tenant_id=_required_text(tenant_id, "tenant_id"),
+            collection_item_ids=(),
+            editable_collection_ids=(),
+            document_item_ids=document_item_ids,
+            limit=limit,
+            candidate_limit=max(limit, self._candidate_limit),
+        )
+        return _normalise_points(points)
 
     def current_processing_signature(self) -> dict[str, Any]:
         """Report this index's own embedding/contextualization/schema versions.
@@ -341,6 +417,11 @@ class ItemIndex:
                 else None
             ),
         }
+
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed short texts with the index's embedding model (one batched call)."""
+
+        return await self._require_embedder().embed_documents(texts)
 
     def _require_embedder(self) -> EmbeddingService:
         if self._embedder is None:

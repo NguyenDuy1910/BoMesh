@@ -7,7 +7,7 @@ import { handleUnauthenticated, sessionToken } from "@/lib/session";
 /**
  * Knowledge API (`/api/v1`, openapi.yaml "Knowledge" + "Library"): items, search,
  * the member library (saved, recent, saved searches), contributions,
- * topics, uploads and space materials. Every function takes the bare workspace ID;
+ * concept schemes and concepts (read), uploads and space materials. Every function takes the bare workspace ID;
  * item/list/contribution arguments accept a bare ID or a full resource name.
  */
 
@@ -22,7 +22,12 @@ export type SavedItem = Schema<"SavedItem">;
 export type RecentItem = Schema<"RecentItem">;
 export type SavedSearch = Schema<"SavedSearch">;
 export type Contribution = Schema<"Contribution">;
-export type Topic = Schema<"Topic">;
+export type ConceptScheme = Schema<"ConceptScheme">;
+export type Concept = Schema<"Concept">;
+export type DocumentConcept = Schema<"DocumentConcept">;
+export type DocumentIssuance = Schema<"DocumentIssuance">;
+export type DocumentApplicability = Schema<"DocumentApplicability">;
+export type SearchItemsInterpretation = Schema<"SearchItemsInterpretation">;
 export type Member = Schema<"Member">;
 export type Space = Schema<"Space">;
 export type Material = Schema<"Material">;
@@ -161,7 +166,9 @@ export async function searchItems(workspace: string, request: SearchItemsRequest
   }
 }
 
-/** PATCH with an explicit update mask (`displayName`, `document.topics`, `document.summary`, …). `keepalive`: the
+/** PATCH with an explicit update mask (`displayName`, `document.concepts`, `document.issuance`, `document.applicability`,
+ *  `document.summary`, …; `document.concepts` sets every classification scheme's whole-document concepts: listed ones
+ *  become ACCEPTED, the rest REJECTED). `keepalive`: the
  *  request outlives the page (a held change sent while the person reloads or leaves). */
 export function updateItem(workspace: string, item: string, patch: Item, updateMask: readonly string[], { keepalive }: { keepalive?: boolean } = {}): Promise<Item> {
   return call(
@@ -442,19 +449,39 @@ export async function deleteContribution(workspace: string, contribution: string
   );
 }
 
-/* ═══════════════ Topics ═══════════════ */
+/* ═══════════════ Taxonomy (concept schemes and their concepts, read side) ═══════════════ */
 
-/** Active topics and domains, ordered by name, in the BASIC view (no classification signals, evidence or review counts). */
-export function listTopics(workspace: string, options: { filter?: string } = {}): Promise<Topic[]> {
+/** Every concept scheme of the workspace, classification and authority, in tab order (`position`). */
+export function listConceptSchemes(workspace: string): Promise<ConceptScheme[]> {
   return listAll(
     (pageToken) =>
       call(
-        api.GET("/api/v1/workspaces/{workspace}/topics", {
-          params: { path: ws(workspace), query: { pageSize: 500, orderBy: "displayName", filter: options.filter ?? "state = ACTIVE", view: "BASIC", pageToken } },
+        api.GET("/api/v1/workspaces/{workspace}/conceptSchemes", {
+          params: { path: ws(workspace), query: { pageSize: 1000, orderBy: "position", pageToken } },
         }),
       ),
-    (page) => page.topics,
+    (page) => page.conceptSchemes,
   );
+}
+
+/** A scheme's working copy: DRAFT, PUBLISHED and DEPRECATED concepts, by notation. `scheme`: bare ID or name. */
+export function listConcepts(workspace: string, scheme: string): Promise<Concept[]> {
+  return listAll(
+    (pageToken) =>
+      call(
+        api.GET("/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/concepts", {
+          params: { path: { workspace, conceptScheme: resourceId(scheme) }, query: { pageSize: 1000, pageToken } },
+        }),
+      ),
+    (page) => page.concepts,
+  );
+}
+
+/** The schemes with every scheme's concepts (one ListConcepts per scheme, in parallel). */
+export async function loadTaxonomyData(workspace: string): Promise<{ schemes: ConceptScheme[]; concepts: Concept[] }> {
+  const schemes = await listConceptSchemes(workspace);
+  const lists = await Promise.all(schemes.map((s) => listConcepts(workspace, s.name ?? "")));
+  return { schemes, concepts: lists.flat() };
 }
 
 /* ═══════════════ People, sources, spaces (lookups the knowledge UI shows) ═══════════════ */

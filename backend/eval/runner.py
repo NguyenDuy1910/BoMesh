@@ -42,11 +42,13 @@ from eval.metrics import (
 
 STAGES = ("retrieval", "leak", "agent")
 
-#: Named retrieval settings compared side by side; ``configured`` is ``.env``.
+#: Named retrieval settings compared side by side; ``configured`` is ``.env``. ``matches``
+#: gives the agent its matches alone (no surrounding chunks).
 VARIANTS: dict[str, dict[str, Any]] = {
     "configured": {},
     "fused": {"reranking_enabled": False},
     "rerank": {"reranking_enabled": True},
+    "matches": {"context_chunks": 0},
 }
 
 _FUSED_CUTOFFS = (1, 3, 5, 10, 20)
@@ -103,6 +105,7 @@ async def run_variant(
             "reranking_enabled": retrieval.reranking_enabled,
             "candidate_count": retrieval.hybrid_candidate_limit,
             "final_top_k": retrieval.final_top_k,
+            "context_chunks": retrieval.context_chunks,
             "agent_model": config.model.chat_model,
             "agent_provider": config.model.agent_provider,
             "reranker_model": config.model.reranker_model or runtime.model_transport().model,
@@ -165,6 +168,7 @@ class _Probe:
         self._scope = dataset.manifest.collection_item_ids
         self._candidates = config.retrieval.hybrid_candidate_limit
         self._top_k = config.retrieval.final_top_k
+        self._context_chunks = config.retrieval.context_chunks
         self.other_collections: tuple[str, ...] = ()
 
     def _row(self, question: BenchmarkQuestion, stage: str) -> dict[str, Any]:
@@ -203,6 +207,7 @@ class _Probe:
             (question.question,),
             limit=self._top_k,
             ctx=self._context(tenant_id=self._tenant_id, scope=self._scope),
+            context_chunks=self._context_chunks,
         )
         final_ms = (perf_counter() - started) * 1_000
 
@@ -388,27 +393,41 @@ class _Probe:
                     "correct": 1.0 if verdict.correctness == 2 else 0.0,
                     "grounded": 1.0 if verdict.grounded else 0.0,
                     "abstained": 1.0 if verdict.abstained else 0.0,
+                    "off_topic_citation": 1.0 if verdict.off_topic_citation else 0.0,
+                    "unsourced_specifics": 1.0 if verdict.unsourced_specifics else 0.0,
                     "judge_reason": verdict.reason,
                 }
             )
         return [row]
 
     async def _cited_passages(self, citations: list[dict[str, Any]]) -> list[tuple[str, str]]:
-        """The indexed text of each cited target: the in-scope chunk cut from exactly its blocks."""
+        """The indexed text of each cited target: the in-scope chunk cut from exactly its blocks.
+
+        Blocks do not name one chunk: every row of a table is cut from the same table node, so a
+        cited row is the chunk with those blocks, its quote and its highlights.
+        """
         passages: list[tuple[str, str]] = []
         chunks_of: dict[str, list[ContextualChunk]] = {}
-        for citation in {(c["item_id"], tuple(c["refs"])): c for c in citations}.values():
+        unique = {
+            (c["item_id"], tuple(c["refs"]), c.get("quote", ""), json.dumps(c.get("highlights", []), sort_keys=True)): c
+            for c in citations
+        }
+        for citation in unique.values():
             item_id = citation["item_id"]
             if item_id not in chunks_of:
                 chunks_of[item_id] = await self._index.get_item_content(
-                    item_id, tenant_id=self._tenant_id, limit=500
+                    item_id, tenant_id=self._tenant_id, limit=10_000
                 )
             refs = tuple(citation["refs"])
+            highlights = citation.get("highlights", [])
             chunk = next(
                 (
                     chunk
                     for chunk in chunks_of[item_id]
-                    if chunk.collection_item_id in self._scope and tuple(chunk.refs) == refs
+                    if chunk.collection_item_id in self._scope
+                    and tuple(chunk.refs) == refs
+                    and chunk.quote == citation.get("quote", chunk.quote)
+                    and [highlight.to_wire() for highlight in chunk.highlights] == highlights
                 ),
                 None,
             )
@@ -419,7 +438,8 @@ class _Probe:
 
 def _passage(source: ContextualChunk | Evidence, quotes: list[str]) -> dict[str, Any]:
     if isinstance(source, Evidence):
-        chunk_id, text, refs = source.chunk_id, source.content, source.target.refs
+        # What the agent reads of a match: the passage around it.
+        chunk_id, text, refs = source.chunk_id, source.passage, source.target.refs
     else:
         chunk_id, text, refs = source.id, source.chunk_text, source.refs
     return {

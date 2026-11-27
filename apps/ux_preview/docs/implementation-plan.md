@@ -303,7 +303,7 @@ Sign in → choose workspace → Home → Browse/search → open a document → 
 **Localization**
 - [ ] In Vietnamese, the core flows show no English except product names, file types and content.
 - [ ] No sentence mixes Vietnamese and English (check processing failures, inbox, toasts with names).
-- [ ] Names inside sentences ("You joined {space}") are never translated, including names equal to UI words ("Home", "Topics").
+- [ ] Names inside sentences ("You joined {space}") are never translated, including names equal to UI words ("Home", "Classification").
 - [ ] Numbers, sizes, dates and relative times follow the locale (1.234 · 1,5 MB · 22 thg 11, 2026 · 5 phút trước).
 - [ ] Short controls fit Vietnamese at 390 px without clipping; diacritics aren't cut.
 - [ ] Switching language keeps unsaved form input and updates `<html lang>`.

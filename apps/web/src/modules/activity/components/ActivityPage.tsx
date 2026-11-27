@@ -37,7 +37,9 @@ import { useMessages } from "@/lib/i18n";
 import { activitySections, sectionTitle, useSection } from "@/lib/navigation";
 import { useTokenPages } from "@/lib/paging";
 import { useWorkspace } from "@/lib/workspace";
-import { useItemsByName, useKnowledgeBases, useMemberNames } from "@/modules/knowledge/queries";
+import { taxonomyHref } from "@/modules/curation/model";
+import { useItemsByName, useKnowledgeBases, useMemberNames, useTaxonomy } from "@/modules/knowledge/queries";
+import { conceptLabel, schemeByName } from "@/modules/knowledge/taxonomy";
 import { useConnections, useSources } from "@/modules/overview/queries";
 import { listMemberPage } from "@/modules/people/api";
 import { MoreMenu } from "@/modules/people/components/MoreMenu";
@@ -97,7 +99,10 @@ const GENERIC_NAMES = new Set([
   "Một nguồn dữ liệu",
   "Một tài khoản đã kết nối",
   "Một yêu cầu",
-  "Một chủ đề",
+  "Một trục phân loại",
+  "Một khái niệm",
+  "Một đề xuất phân loại",
+  "Một quy tắc phân loại",
   "Một tài liệu đã gửi",
   "Một mục công việc",
 ]);
@@ -111,7 +116,7 @@ const personOf = (name: string | undefined) => {
 
 /**
  * Names for the actors and targets of `events` (the page on screen): people in one batch read, the rest from the
- * workspace's bounded directories (groups, roles, spaces, collections, sources).
+ * workspace's bounded directories (groups, roles, spaces, collections, sources, the taxonomy).
  */
 function useNames(events: readonly AuditEvent[]): Names {
   const { id: ws, workspace } = useWorkspace();
@@ -122,6 +127,7 @@ function useNames(events: readonly AuditEvent[]): Names {
   const bases = useKnowledgeBases({ showLocked: true });
   const sources = useSources();
   const connections = useConnections();
+  const taxonomy = useTaxonomy().data;
   return useMemo(() => {
     const person = (id: string) => people.get(`workspaces/${ws}/members/${id}`);
     const actor = (a: string | undefined) => (a === SYSTEM ? "BoMesh" : person(resourceId(a)) || "Thành viên cũ");
@@ -153,8 +159,16 @@ function useNames(events: readonly AuditEvent[]): Names {
           return connections.data?.find((c) => resourceId(c.name) === id)?.displayName ?? "Một tài khoản đã kết nối";
         case "request":
           return "Một yêu cầu";
-        case "topic":
-          return "Một chủ đề";
+        case "scheme":
+          return schemeByName(taxonomy, id)?.displayName ?? "Một trục phân loại";
+        case "concept": {
+          const concept = String(name).split("/").slice(0, 6).join("/");
+          return taxonomy.byName.has(concept) ? conceptLabel(taxonomy, concept) : "Một khái niệm";
+        }
+        case "proposal":
+          return "Một đề xuất phân loại";
+        case "rule":
+          return "Một quy tắc phân loại";
         case "contribution":
           return "Một tài liệu đã gửi";
         case "artifact":
@@ -169,13 +183,14 @@ function useNames(events: readonly AuditEvent[]): Names {
       return describeAction(ev.action, kind === "item" && isBase(id) ? "kho tài liệu" : undefined);
     };
     return { actor, target, isBase, what, isMember: (id: string) => person(id) !== undefined };
-  }, [people, ws, groups.data, roles.data, spaces.data, bases.data, sources.data, connections.data, workspace.displayName]);
+  }, [people, ws, groups.data, roles.data, spaces.data, bases.data, sources.data, connections.data, taxonomy, workspace.displayName]);
 }
 
-/** Where an event's target can be opened now (preview `related`). */
-function related(ev: AuditEvent, names: Names, canPeople: boolean, hasModule: (m: "requests") => boolean): { label: string; href: string } | null {
+/** Where an event's target can be opened now (preview `related`); Classification's targets only for who can open it. */
+function related(ev: AuditEvent, names: Names, can: { people: boolean; classify: boolean }, hasModule: (m: "requests") => boolean): { label: string; href: string } | null {
   const { kind, id } = targetOf(ev.target);
   const label = names.target(ev.target);
+  const canPeople = can.people;
   switch (kind) {
     case "member":
     case "user":
@@ -201,6 +216,14 @@ function related(ev: AuditEvent, names: Names, canPeople: boolean, hasModule: (m
     case "request":
       if (ev.category === "PEOPLE" || ev.category === "KNOWLEDGE") return canPeople ? { label: "Mở các yêu cầu truy cập", href: "/people?tab=requests" } : null;
       return hasModule("requests") ? { label: "Mở yêu cầu", href: `/requests/${id}` } : null;
+    case "scheme":
+      return can.classify ? { label: `Mở ${label}`, href: taxonomyHref(id) } : null;
+    case "concept":
+      return can.classify ? { label: `Mở ${label}`, href: taxonomyHref(String(ev.target).split("/")[3], { node: id }) } : null;
+    case "proposal":
+      return can.classify ? { label: "Mở Gợi ý phân loại", href: taxonomyHref("suggestions") } : null;
+    case "rule":
+      return can.classify ? { label: "Mở Phân loại", href: taxonomyHref() } : null;
     default:
       return null;
   }
@@ -572,10 +595,10 @@ function FiltersSheet({ facets, filters, onChange }: { facets: readonly Facet[];
 /** Event drawer (preview `drawer()`): the person and action are its title line; Technical details stay folded. */
 function EventDrawer({ eventId, names, canPeople, onClose }: { eventId: string | null; names: Names; canPeople: boolean; onClose: () => void }) {
   const router = useRouter();
-  const { id: ws, hasModule } = useWorkspace();
+  const { id: ws, hasModule, can } = useWorkspace();
   const event = useQuery({ queryKey: [ws, "activity", "event", eventId], queryFn: () => getAuditEvent(ws, eventId!), enabled: Boolean(eventId), retry: false });
   const ev = event.data;
-  const to = ev ? related(ev, names, canPeople, hasModule) : null;
+  const to = ev ? related(ev, names, { people: canPeople, classify: can("conceptSchemes.update") || can("conceptProposals.decide") }, hasModule) : null;
   const actor = ev ? names.actor(ev.actor) : "";
   const id = ev ? resourceId(ev.name) : "";
   return (

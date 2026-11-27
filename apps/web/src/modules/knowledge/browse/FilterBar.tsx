@@ -21,11 +21,20 @@ interface FacetProps {
   onApply: (next: BrowseParams) => void;
 }
 
+/** A facet's name: a scheme's own (content), else the catalog's. */
+export function useFacetName(): (f: BrowseFacetDef) => string {
+  const names: Readonly<Record<string, string>> = useMessages().knowledge.browse.facets;
+  return (f) => f.label ?? names[f.id] ?? f.id;
+}
+
+/** An option's name and count. A concept is content, never translated; a narrower one carries its broader path on a second,
+ *  quieter line, and its full path as the tooltip (preview `optLabel`). */
 function OptionLabel({ option }: { option: BrowseOption }) {
   return (
     <>
-      <span className="cat-opt__label" translate={option.ui ? undefined : "no"}>
+      <span className="cat-opt__label" translate={option.ui ? undefined : "no"} title={option.title}>
         {option.label}
+        {option.in ? <span className="cat-opt__in">{option.in}</span> : null}
       </span>
       {option.count !== null ? <span className="cat-opt__n">{fmtNum(option.count)}</span> : null}
     </>
@@ -50,7 +59,7 @@ function OptionBox({ option, onToggle }: { option: BrowseOption; onToggle: () =>
 /** One facet's choices (preview `facetBody`): checkboxes with live counts (the first six, then Show all), or the Updated radio list. */
 function FacetBody({ facet: f, p, options, onApply }: FacetProps & { facet: BrowseFacetDef }) {
   const [more, setMore] = useState(false);
-  const name = useMessages().knowledge.browse.facets[f.id];
+  const name = useFacetName()(f);
   const opts = options[f.id] ?? [];
   if (f.single) {
     const on = opts.find((o) => o.on)?.value ?? "";
@@ -91,7 +100,7 @@ function FacetBody({ facet: f, p, options, onApply }: FacetProps & { facet: Brow
 }
 
 function FacetGroup(props: FacetProps & { facet: BrowseFacetDef }) {
-  const name = useMessages().knowledge.browse.facets[props.facet.id];
+  const name = useFacetName()(props.facet);
   return (
     <section className="cat-group" aria-label={name}>
       <h3 className="cat-group__title">{name}</h3>
@@ -140,7 +149,7 @@ function FilterPopover({ label, title, set, className, icon: Icon, footer, child
 }
 
 export interface FilterBarProps extends FacetProps {
-  /** Filter facets (everything but topic, which the pills own). */
+  /** Filter facets: everything but the first classification scheme, which the pills own. */
   facets: readonly BrowseFacetDef[];
   total: number;
   /** The search field (left start): one more way to narrow the same results. */
@@ -150,16 +159,16 @@ export interface FilterBarProps extends FacetProps {
 }
 
 /**
- * The bar right above the results (preview `filterBar`): the search field, then Type · Updated · Trust · Owner as
- * their own buttons, the facets that can still narrow under More filters; on phones one Filters button opens them
- * all as a bottom sheet.
+ * The bar right above the results (preview `filterBar`): the search field, then the other classification schemes and
+ * Format · Updated · Trust · Owner as their own buttons, the facets that can still narrow under More filters; on phones
+ * one Filters button opens them all as a bottom sheet.
  */
 export function FilterBar({ p, options, onApply, facets, total, search, end }: FilterBarProps) {
   const [sheet, setSheet] = useState(false);
-  const names = useMessages().knowledge.browse.facets;
-  const inline = INLINE_FACETS.map((id) => facets.find((f) => f.id === id)).filter((f): f is BrowseFacetDef => !!f);
+  const facetName = useFacetName();
+  const inline = [...facets.filter((f) => f.scheme), ...INLINE_FACETS.map((id) => facets.find((f) => f.id === id)).filter((f): f is BrowseFacetDef => !!f)];
   /** More filters: the remaining facets that can still narrow the set (two or more values) or hold a selection. */
-  const more = facets.filter((f) => !INLINE_FACETS.includes(f.id) && ((options[f.id]?.length ?? 0) > 1 || (p.filters[f.id]?.length ?? 0) > 0));
+  const more = facets.filter((f) => !f.scheme && !INLINE_FACETS.includes(f.id) && ((options[f.id]?.length ?? 0) > 1 || (p.filters[f.id]?.length ?? 0) > 0));
   const all = [...inline, ...more];
   const nMore = nOn(p, more);
   const nAll = nOn(p, facets);
@@ -177,7 +186,7 @@ export function FilterBar({ p, options, onApply, facets, total, search, end }: F
       <div className="cat-bar__filters">
         {inline.map((f) => {
           const on = p.filters[f.id] ?? [];
-          const name = names[f.id];
+          const name = facetName(f);
           const one = on.length === 1 ? options[f.id]?.find((o) => o.value === on[0]) : undefined;
           // Separate nodes so the legacy localizer touches the value only when it's UI vocabulary.
           const text =

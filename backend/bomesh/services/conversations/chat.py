@@ -309,7 +309,7 @@ class _Reply:
 
         if self.state != "completed":
             return []
-        stored: dict[tuple[UUID, int, str, tuple[str, ...]], CitationTarget] = {}
+        stored: dict[tuple[object, ...], CitationTarget] = {}
         for annotation in self._annotations:
             citation = annotation.get("citation")
             if annotation.get("type") != DOCUMENT_CITATION_TYPE or not isinstance(citation, dict):

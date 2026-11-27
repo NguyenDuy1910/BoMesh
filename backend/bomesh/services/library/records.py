@@ -96,21 +96,24 @@ class HomeCollection:
 
 
 @dataclass(frozen=True, slots=True)
-class HomeTopic:
+class HomeConcept:
+    """A concept of the Home scheme: its current display name and the caller's documents in it."""
+
     workspace_id: UUID
-    code: str
+    scheme_code: str
+    notation: str
     display_name: str
     document_count: int
 
 
 @dataclass(frozen=True, slots=True)
-class HomeTopicDomain:
-    domain: HomeTopic
+class HomeFeaturedConcept:
+    concept: HomeConcept
     description: str | None
     icon: str | None
     color: str | None
     new_document_count: int
-    top_topics: tuple[HomeTopic, ...]
+    top_concepts: tuple[HomeConcept, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +140,7 @@ class HomeFeatured:
 class HomeRecommended:
     item: HomeItem
     reason_kind: str
-    #: The reason's subject: a starter prompt's title, a topic's or a space's name; empty for POPULAR.
+    #: The reason's subject: a starter prompt's title, a concept's or a space's name; empty for POPULAR.
     reason_label: str
 
 
@@ -146,7 +149,6 @@ class HomeCounts:
     collection_count: int
     document_count: int
     saved_item_count: int
-    topic_count: int
     conversation_count: int
     unread_notification_count: int
 
@@ -158,7 +160,7 @@ class MemberHomeRecord:
     join_time: datetime | None
     counts: HomeCounts
     starter_prompts: tuple[HomeStarterPrompt, ...]
-    topic_domains: tuple[HomeTopicDomain, ...]
+    featured_concepts: tuple[HomeFeaturedConcept, ...]
     collections: tuple[HomeCollection, ...]
     featured: tuple[HomeFeatured, ...]
     recently_published: tuple[HomeItem, ...]
@@ -176,14 +178,14 @@ class MemberHomeRecord:
 __all__ = [
     "TARGET_COLLECTIONS",
     "HomeCollection",
+    "HomeConcept",
     "HomeContribution",
     "HomeCounts",
     "HomeFeatured",
+    "HomeFeaturedConcept",
     "HomeItem",
     "HomeRecommended",
     "HomeStarterPrompt",
-    "HomeTopic",
-    "HomeTopicDomain",
     "ItemReference",
     "MemberHomeRecord",
     "NotificationRecord",

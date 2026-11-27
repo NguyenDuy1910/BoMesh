@@ -43,16 +43,24 @@
     const r = res(d), glyph = r.source.app && r.source.app !== 'upload' ? appIcon(r.source.app, 'sm') : '';
     return `<span class="res-prov">${glyph}<span class="truncate">${esc(kb ? r.kb?.name || '' : r.source.name)}</span></span>`;
   }
-  const topicHref = id => catalogHref({ filters: { topic: [id] } });
-  function topicChips(d, { max = 2 } = {}) {
-    const t = res(d).topics.slice(0, max);
-    return t.length ? `<span class="res-topics">${t.map(id => topicTag(id, { href: topicHref(id) })).join('')}</span>` : '';
+  /** A document's accepted concepts in reading order: the first classification scheme's (its primary first), then the other
+      schemes' in their tab order. */
+  function conceptOrder(d) {
+    const pos = new Map(classSchemes().map((s, i) => [s.id, i])), prim = new Set(docAssignments(d).filter(a => a.primary).map(a => a.id));
+    const at = id => pos.get(conceptById(id)?.scheme) ?? pos.size;
+    return resConcepts(d).map((id, i) => ({ id, i })).sort((a, b) => at(a.id) - at(b.id) || prim.has(b.id) - prim.has(a.id) || a.i - b.i).map(x => x.id);
   }
-  /** A card's topics: the first as a tag (plain, since the whole card is the control), the rest as +n with their names in its
+  /** A row's concepts: at most `max` tags, each a link to Browse filtered to it, the rest as +n with their names in its tooltip. */
+  function conceptChips(d, { max = 2 } = {}) {
+    const ids = conceptOrder(d), rest = ids.slice(max);
+    if (!ids.length) return '';
+    return `<span class="res-concepts">${ids.slice(0, max).map(id => conceptTag(id, { href: conceptHref(id) })).join('')}${rest.length ? `<span class="res-concepts__more" title="${esc(rest.map(conceptName).join(', '))}" translate="no">+${rest.length}</span>` : ''}</span>`;
+  }
+  /** A card's concepts: the first as a tag (plain, since the whole card is the control), the rest as +n with their names in its
       tooltip — a narrow card can't show two tags without cutting both. */
   function cardTags(ids) {
     const more = ids.length - 1;
-    return `<div class="doc-card__tags">${topicTag(ids[0])}${more > 0 ? `<span class="doc-card__more" title="${esc(ids.slice(1).map(topicName).join(', '))}">+${more}</span>` : ''}</div>`;
+    return `<div class="doc-card__tags">${conceptTag(ids[0])}${more > 0 ? `<span class="doc-card__more" title="${esc(ids.slice(1).map(conceptName).join(', '))}" translate="no">+${more}</span>` : ''}</div>`;
   }
   /** Fictional-data marker for demo workspaces. */
   const demoChip = () => (isDemoWs() ? chip('Demo data', { size: 'sm', icon: 'info', tip: curWs().demo }) : '');
@@ -103,7 +111,7 @@
         <span class="res-row__title"><span class="truncate" translate="no">${markTokens(title, toks)}</span>${trustChip(d, { quiet: true })}${statusChip(d)}</span>
         <span class="res-row__meta">${src}${meta}</span>
         ${desc}
-        ${compact ? '' : topicChips(d)}
+        ${compact ? '' : conceptChips(d)}
       </span>
       <span class="res-row__trail">${trail}<span class="reveal-on-hover">${reveal}${saveBtn(d)}${moreBtn(d)}</span></span>
     </div>`;
@@ -198,14 +206,14 @@
     return t.state === 'review' ? chip(t.label, { tone: t.tone, icon: t.icon, size: 'sm', tip: t.note }) : '';
   }
   /** Document card (Knowledge grid): a compact tile to recognise a document and judge it without opening it — the top of its first
-      page, its file icon and title, one line on what it is for, its topics as colored tags, then how fresh (where it lives when it
-      has no topic); indexing and trust only when they matter. Save and ⋯ appear on hover/focus (always on touch).
+      page, its file icon and title, one line on what it is for, its concepts as colored tags, then how fresh (where it lives when it
+      is filed under nothing); indexing and trust only when they matter. Save and ⋯ appear on hover/focus (always on touch).
       opts: act + data (what selecting the card does, e.g. a quick preview), q (highlight, matching passage when there is no cover image),
-      hide (['kb', 'topic']: context every card in the set shares, so it isn't repeated). */
+      hide (['kb', 'concept']: context every card in the set shares, so it isn't repeated). */
   function card(d, { act, data, q = '', hide = [] }) {
     const r = res(d), toks = tokens(q);
-    const topics = hide.includes('topic') ? [] : r.topics;
-    const where = !topics.length && !hide.includes('kb') ? r.kb?.name || '' : '';
+    const concepts = hide.includes('concept') ? [] : conceptOrder(d);
+    const where = !concepts.length && !hide.includes('kb') ? r.kb?.name || '' : '';
     const about = blurb(d);
     const meta = where ? esc(where) : '';
     return `<article class="doc-card" role="button" tabindex="0" data-act="${act}" ${dataAttrs({ id: d.id, ...(data || {}) })}>
@@ -214,20 +222,58 @@
       <div class="doc-card__body">
         <div class="doc-card__head">${fileIcon(d.type, 'sm')}<h3 class="doc-card__title" translate="no">${markTokens(docTitle(d), toks)}</h3></div>
         ${about ? `<p class="doc-card__about" translate="no">${markTokens(about, toks)}</p>` : ''}
-        ${topics.length ? cardTags(topics) : ''}
+        ${concepts.length ? cardTags(concepts) : ''}
         <div class="doc-card__meta">${meta ? `<span class="doc-card__where truncate">${meta}</span>` : ''}<span class="doc-card__when" data-tip="Updated ${esc(fmtDate(d.updated))}">${esc(rel(d.updated))}</span>${statusChip(d)}${trustMark(d)}</div>
       </div>
     </article>`;
   }
 
-  /** Metadata list (About): what it is, where it lives, where it came from, who owns it, who can see it. */
+  /** One row per classification scheme, in tab order: [scheme name, its concepts]. Accepted ones link to Browse; the classifier's
+      suggestions are marked “Awaiting review”; a scheme the classifier left in its pool says “Not classified”, an empty one “—”.
+      `editable` (the viewer edits the document): an empty or unclassified scheme offers Add (Edit details). `compact` leaves out
+      schemes with nothing to show and draws plain tags. */
+  function schemeRows(d, { editable = false, compact = false } = {}) {
+    return assignmentsByScheme(d).map(({ scheme, items, uncertain }) => {
+      const tags = items.map(a => conceptTag(a.id, { href: compact || a.state === 'suggested' ? '' : conceptHref(a.id), suggested: a.state === 'suggested' })).join('');
+      if (tags) return [scheme.name, `<span class="res-concepts">${tags}</span>`];
+      if (compact && !uncertain) return null;
+      const add = editable && canEditRes(d) ? linkBtn('Add', { act: 'res-edit', data: { id: d.id } }) : '';
+      return [scheme.name, `<span class="row gap-8"><span class="muted">${esc(uncertain ? 'Not classified' : '—')}</span>${add}</span>`];
+    }).filter(Boolean);
+  }
+  /** A document's concepts grouped by classification scheme (Studio's document drawer, review): a description list, '' when
+      there is nothing to show. Options: see schemeRows. */
+  const conceptsByScheme = (d, opts) => { const rows = schemeRows(d, opts); return rows.length ? kv(rows) : ''; };
+  /** “Document facts” (an issued document's issuance and applicability): number, issued and effective dates, issuing unit, who it
+      applies to and what it replaces. Empty rows are left out; '' when there are none. Replaced documents the viewer can't open
+      aren't named; references nobody could match to a document show as written. */
+  function issuance(d) {
+    const x = issuanceOf(d); if (!x) return '';
+    const who = applicabilityText(d);
+    const replaced = [
+      ...x.supersedes.filter(canOpenRes).map(o => `<a class="link" href="#/doc/${esc(o.id)}" translate="no">${esc(docTitle(o))}</a>`),
+      ...x.unresolved.filter(Boolean).map(t => `<span translate="no">${esc(t)}</span>`),
+    ];
+    const rows = [
+      x.number && ['Number', `<span translate="no">${esc(x.number)}</span>`],
+      x.issued && ['Issued', esc(fmtDate(x.issued))],
+      x.effective && ['Effective', esc(fmtDate(x.effective))],
+      x.issuer && conceptById(x.issuer) && ['Issued by', `<span translate="no">${esc(conceptName(x.issuer))}</span>`],
+      who && ['Applies to', x.level === 'institution' ? esc(who) : `<span translate="no">${esc(who)}</span>`],
+      replaced.length && ['Supersedes', `<span class="stack gap-2">${replaced.join('')}</span>`],
+    ].filter(Boolean);
+    return rows.length ? `<section class="res-facts" aria-label="${esc('Document facts')}"><h4 class="res-facts__title">${esc('Document facts')}</h4>${kv(rows)}</section>` : '';
+  }
+
+  /** Metadata list (About): what it is and what it's filed under, where it lives, where it came from, who owns it, who can see it;
+      then its Document facts when it is an issued document. */
   function details(d) {
     const r = res(d), t = trustOf(d), who = X.whoCanSee && r.kb ? X.whoCanSee(r.kb, docFolder(d)) : { icon: 'lock', label: '' };
     const path = folderPath(docFolder(d)).map(f => f.name);
     const spaces = r.contexts.map(spaceById).filter(Boolean);
     return kv([
       ['Type', `<span class="row gap-6">${ic(typeMeta(d).icon, 'i-sm muted')}${esc(typeMeta(d).label)}</span>`],
-      ['Topics', r.topics.length ? `<span class="res-topics">${r.topics.map(id => topicTag(id, { href: topicHref(id) })).join('')}</span>` : '<span class="muted">None yet</span>'],
+      ...schemeRows(d),
       hasModule('spaces') && ['Spaces', spaces.length ? spaces.map(s => `<a class="link" href="#/space/${s.id}">${esc(s.code ? `${s.name} · ${s.code}` : s.name)}</a>`).join(', ') : '<span class="muted">Not linked</span>'],
       ['Owner', esc(r.owner || 'No owner')],
       ['Collection', r.kb ? `<span class="stack gap-2"><a class="link" href="#${kbHref(r.kb)}">${esc(r.kb.name)}</a>${path.length ? `<span class="t-xs muted" translate="no">${esc(path.join(' › '))}</span>` : ''}</span>` : '—'],
@@ -236,10 +282,10 @@
       ['Version', `v${r.version} · ${esc(fmtDate(d.updated))}`],
       ['Language', esc(LANGS[r.lang] || r.lang)],
       ['Who can see it', `<span class="stack gap-2"><span class="row gap-6">${ic(who.icon, 'i-sm muted')}${esc(who.label)}</span>${who.via ? `<span class="t-xs muted">${esc(`Set on the folder ${who.via.name}, not the collection`)}</span>` : ''}</span>`],
-    ]);
+    ]) + issuance(d);
   }
 
-  X.res = { trustChip, statusChip, saveBtn, moreBtn, provenance, topicChips, topicHref, demoChip, hubHeader, libraryNav, libraryTab, uploadBtn, row, rows, card, cover, coverHtml, thumb: preview, blurb, matchPassage, details, canEditRes, linkableSpaces };
+  X.res = { trustChip, statusChip, saveBtn, moreBtn, provenance, conceptOrder, conceptChips, schemeRows, conceptsByScheme, issuance, demoChip, hubHeader, libraryNav, libraryTab, uploadBtn, row, rows, card, cover, coverHtml, thumb: preview, blurb, matchPassage, details, canEditRes, linkableSpaces };
 
   /* ═══════════════ Actions ═══════════════ */
   /** Knowledge dialogs validate on submit, then clear the error as soon as the field is filled (data-input="kn-revalidate"
@@ -306,18 +352,65 @@
   };
 
   /* ── Edit details (editors of the collection) ── */
+  /** A date input's value (the local day, YYYY-MM-DD) ↔ ms. */
+  const toDay = ms => { if (!ms) return ''; const t = new Date(ms); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
+  const fromDay = s => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : null; };
+  /** What Edit details may change on a document (Undo restores these). */
+  const EDIT_KEYS = ['name', 'concepts', 'uncertain', 'issuance', 'applicability', 'lang', 'summary', 'owner', 'classifiedBy'];
+  /** Document facts are offered where documents are issued by units (the workspace has authority schemes), or when a document
+      already carries them. */
+  const factsOffered = d => authoritySchemes().length > 0 || !!issuanceOf(d);
   A['res-edit'] = el => {
-    const d = docById(el.dataset.id); if (!canEditRes(d)) return; const r = res(d);
+    const d = docById(el.dataset.id); if (!canEditRes(d)) return; const r = res(d), x = issuanceOf(d);
+    // Per classification scheme: what it's filed under, then what awaits review (both editable; suggestions stay marked).
+    const concepts = Object.fromEntries(classSchemes().map(s => [s.id, schemeConceptIds(d, s.id)]));
+    const attention = !r.concepts.length || assignmentsByScheme(d).some(g => g.uncertain || g.items.some(a => a.state === 'suggested'));
     // People edit the title; the file keeps its extension, and so its type (the format badge already says PDF/MD).
-    S.ui.resEdit = { id: d.id, name: docTitle(d), topics: [...r.topics], owner: d.owner || '', lang: r.lang, summary: d.summary || '', touched: false, busy: false, showTopics: !r.topics.length, more: false };
+    S.ui.resEdit = {
+      id: d.id, name: docTitle(d), owner: d.owner || '', lang: r.lang, summary: d.summary || '', touched: false, busy: false, more: false,
+      concepts, start: clone(concepts), suggested: suggestedConcepts(d), showConcepts: attention, showFacts: false,
+      number: x?.number || '', issued: toDay(x?.issued), effective: toDay(x?.effective), issuer: x?.issuer || '',
+      level: x?.level || '', units: [...(x?.units || [])], programs: [...(x?.programs || [])], cohorts: (x?.cohorts || []).join(', '),
+      supersedes: (d.issuance?.supersedes || []).filter(docById),
+    };
     openModal('res-edit', {});
   };
+  /** One picker per classification scheme, labelled with the scheme's name. */
+  function conceptFields(f, d) {
+    return classSchemes().map(s => {
+      const ids = f.concepts[s.id] || [], pool = (d.uncertain || []).includes(s.id) && !ids.length;
+      return `<div class="res-scheme"><span class="res-scheme__label" translate="no">${esc(s.name)}</span>${conceptPicker({ id: 'rese-c-' + s.id, ids, act: 'res-edit-concept', data: { scheme: s.id }, scheme: s.id, label: s.name, suggested: f.suggested, empty: pool ? 'Not classified' : '' })}</div>`;
+    }).join('');
+  }
+  /** Number, dates, issuing unit (when the workspace lists units), who it applies to (level, then the units, programs or
+      cohorts that level names) and the documents it replaces. */
+  function factFields(f, d, dis) {
+    const orgs = schemeById('org-unit') ? conceptsOf('org-unit') : [], progs = schemeById('program') ? conceptsOf('program') : [];
+    const group = (label, body) => `<div class="field"><span class="label">${esc(label)}</span>${body}</div>`;
+    const dates = `<div class="grid cols-2 res-more">
+      ${field({ id: 'rese-num', label: 'Number', control: input({ id: 'rese-num', bind: 'resEdit.number', value: f.number, placeholder: 'e.g. 123/QĐ-ĐHCNKT-ĐT', attrs: `maxlength="128" ${dis}` }) })}
+      ${orgs.length ? field({ id: 'rese-issuer', label: 'Issued by', control: select({ id: 'rese-issuer', bind: 'resEdit.issuer', value: f.issuer, options: [['', 'Not set'], ...orgs.map(c => [c.id, conceptPathText(c.id)])], change: 'res-edit-refresh', attrs: dis }) }) : ''}
+      ${field({ id: 'rese-issued', label: 'Issued', control: input({ id: 'rese-issued', type: 'date', bind: 'resEdit.issued', value: f.issued, attrs: dis }) })}
+      ${field({ id: 'rese-eff', label: 'Effective', control: input({ id: 'rese-eff', type: 'date', bind: 'resEdit.effective', value: f.effective, attrs: dis }) })}</div>`;
+    const levels = [['', 'Not set'], ['institution', APPLICABILITY.institution], ...(orgs.length ? [['unit', APPLICABILITY.unit]] : []), ...(progs.length ? [['program', APPLICABILITY.program], ['cohort', APPLICABILITY.cohort]] : [])];
+    const named = f.level === 'unit' && orgs.length ? conceptPicker({ id: 'rese-units', ids: f.units, act: 'res-edit-unit', scheme: 'org-unit', label: APPLICABILITY.unit, quiet: true })
+      : ['program', 'cohort'].includes(f.level) && progs.length ? conceptPicker({ id: 'rese-programs', ids: f.programs, act: 'res-edit-program', scheme: 'program', label: APPLICABILITY.program, quiet: true }) : '';
+    const cohorts = f.level === 'cohort' ? input({ id: 'rese-cohorts', bind: 'resEdit.cohorts', value: f.cohorts, placeholder: 'Entry years, e.g. 2022, 2023', attrs: `maxlength="60" aria-label="${esc('Cohorts')}" ${dis}` }) : '';
+    const applies = orgs.length || progs.length ? group('Applies to', `<div class="stack gap-8">${select({ id: 'rese-level', bind: 'resEdit.level', value: f.level, options: levels, change: 'res-edit-refresh', label: 'Applies to', attrs: dis })}${named}${cohorts}</div>`) : '';
+    const sups = f.supersedes.map(docById).filter(Boolean);
+    const pool = readableResources().filter(o => o.id !== d.id && !f.supersedes.includes(o.id) && !kbById(o.kb)?.personal && (o.kb === d.kb || o.issuance)).sort((a, b) => docTitle(a).localeCompare(docTitle(b)));
+    const list = sups.length ? `<ul class="res-sups">${sups.map(o => `<li class="res-sup">${fileIcon(o.type, 'sm')}<span class="grow truncate" translate="no">${esc(docTitle(o))}</span>${iconBtn('x', `Remove ${docTitle(o)}`, { size: 'sm', act: 'res-edit-sup-remove', data: { doc: o.id } })}</li>`).join('')}</ul>` : '';
+    const add = pool.length ? select({ id: 'rese-sup', value: '', options: [['', 'Add a document it replaces…'], ...pool.map(o => [o.id, docTitle(o)])], change: 'res-edit-sup-add', size: 'sm', cls: 'res-sup__add', label: 'Add a document it replaces', attrs: dis }) : '';
+    const supersedes = list || add ? group('Supersedes', `<div class="stack gap-8">${list}${add}</div>`) : '';
+    return `<div class="kn-form res-facts-form">${dates}${applies}${supersedes}</div>`;
+  }
   M['res-edit'] = () => {
     const f = ui('resEdit'), d = docById(f.id), r = res(d), err = f.touched && !f.name.trim() ? 'Enter a title.' : '', dis = f.busy ? 'disabled' : '';
-    const tree = topicTree();
-    const topics = tree.map(dm => `<div class="res-tgroup"><div class="res-tgroup__title">${esc(dm.name)}</div><div class="res-tgroup__items">${dm.children.map(t => checkbox({ checked: f.topics.includes(t.id), act: 'res-edit-topic', data: { id: t.id }, label: esc(t.name), disabled: f.busy })).join('')}</div></div>`).join('');
-    const names = f.topics.map(topicName);
-    const topicSum = names.length ? esc(names.slice(0, 2).join(', ')) + (names.length > 2 ? ` +${names.length - 2}` : '') : 'None yet';
+    const names = classSchemes().flatMap(s => f.concepts[s.id] || []).map(conceptName);
+    const conceptSum = names.length ? `<span translate="no">${esc(names.slice(0, 2).join(', '))}</span>${names.length > 2 ? ` +${names.length - 2}` : ''}` : esc('None yet');
+    const classification = classSchemes().length ? disclosure({ path: 'resEdit.showConcepts', icon: 'tag', title: 'Classification', summary: conceptSum, body: `<div class="res-schemes">${conceptFields(f, d)}</div>` }) : '';
+    const factSum = [f.number && `<span translate="no">${esc(f.number)}</span>`, fromDay(f.issued) && esc(fmtDate(fromDay(f.issued)))].filter(Boolean).join(' · ') || esc('None yet');
+    const facts = factsOffered(d) ? disclosure({ path: 'resEdit.showFacts', icon: 'file-text', title: 'Document facts', summary: factSum, body: factFields(f, d, dis) }) : '';
     const kbOwner = ownerOfKb(r.kb) || '';
     const moreSum = esc([LANGS[f.lang] || f.lang, f.owner.trim() || kbOwner].filter(Boolean).join(' · '));
     return {
@@ -325,27 +418,67 @@
       desc: 'What people see in search results, previews and the reader.',
       body: `<div class="kn-form">${field({ id: 'rese-name', label: 'Title', required: true, error: err, control: input({ id: 'rese-name', bind: 'resEdit.name', value: f.name, autofocus: true, onEnter: 'res-edit-go', invalid: !!err, attrs: `maxlength="160" data-input="kn-revalidate" data-form="resEdit" ${dis}` }) })}
         ${field({ id: 'rese-sum', label: 'Summary', optional: true, desc: 'One or two sentences shown in results and previews.', control: textarea({ id: 'rese-sum', bind: 'resEdit.summary', value: f.summary, rows: 2, attrs: `maxlength="280" ${dis}` }) })}
-        <div class="stack gap-8">${tree.length ? disclosure({ path: 'resEdit.showTopics', icon: 'tag', title: 'Topics', summary: topicSum, body: `<div class="res-tgroups">${topics}</div>` }) : '<p class="t-sm muted">This workspace has no topics yet.</p>'}
+        <div class="stack gap-8">${classification}${facts}
         ${disclosure({ path: 'resEdit.more', icon: 'sliders', title: 'Language and owner', summary: moreSum, body: `<div class="grid cols-2 res-more">${field({ id: 'rese-lang', label: 'Language', control: select({ id: 'rese-lang', bind: 'resEdit.lang', value: f.lang, options: Object.entries(LANGS), change: 'res-edit-refresh', attrs: dis }) })}${field({ id: 'rese-owner', label: 'Owner', optional: true, desc: kbOwner ? `Empty uses the collection owner, ${esc(kbOwner)}.` : '', control: input({ id: 'rese-owner', bind: 'resEdit.owner', value: f.owner, placeholder: kbOwner || 'Space or office', onEnter: 'res-edit-go', attrs: dis }) })}</div>` })}</div></div>`,
       footStart: 'Changes show for everyone right away.',
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal', disabled: f.busy }) + btn('Save changes', { v: 'primary', icon: 'check', act: 'res-edit-go', loading: f.busy }),
     };
   };
   A['res-edit-refresh'] = () => refreshLayer();
-  A['res-edit-topic'] = el => { const f = ui('resEdit'), id = el.dataset.id; f.topics = f.topics.includes(id) ? f.topics.filter(x => x !== id) : [...f.topics, id]; refreshLayer(); };
+  const refocus = id => { refreshLayer(); requestAnimationFrame(() => $('#' + id)?.focus()); };
+  /** A scheme that holds one concept (maxLabels 1) swaps it; a full one swaps its last. */
+  A['res-edit-concept-add'] = el => {
+    const f = ui('resEdit'), s = schemeById(el.dataset.scheme), id = el.value; if (!s || !conceptById(id)) return;
+    const ids = f.concepts[s.id] || []; if (ids.includes(id)) return;
+    f.concepts[s.id] = s.maxLabels && ids.length >= s.maxLabels ? [...ids.slice(0, s.maxLabels - 1), id] : [...ids, id];
+    f.suggested = f.suggested.filter(c => c !== id);
+    refocus('rese-c-' + s.id);
+  };
+  A['res-edit-concept-remove'] = el => { const f = ui('resEdit'), s = el.dataset.scheme; f.concepts[s] = (f.concepts[s] || []).filter(x => x !== el.dataset.concept); refocus('rese-c-' + s); };
+  A['res-edit-unit-add'] = el => { const f = ui('resEdit'); if (conceptById(el.value) && !f.units.includes(el.value)) f.units.push(el.value); refocus('rese-units'); };
+  A['res-edit-unit-remove'] = el => { const f = ui('resEdit'); f.units = f.units.filter(x => x !== el.dataset.concept); refocus('rese-units'); };
+  A['res-edit-program-add'] = el => { const f = ui('resEdit'); if (conceptById(el.value) && !f.programs.includes(el.value)) f.programs.push(el.value); refocus('rese-programs'); };
+  A['res-edit-program-remove'] = el => { const f = ui('resEdit'); f.programs = f.programs.filter(x => x !== el.dataset.concept); refocus('rese-programs'); };
+  A['res-edit-sup-add'] = el => { const f = ui('resEdit'); if (docById(el.value) && !f.supersedes.includes(el.value)) f.supersedes.push(el.value); refocus('rese-sup'); };
+  A['res-edit-sup-remove'] = el => { const f = ui('resEdit'); f.supersedes = f.supersedes.filter(x => x !== el.dataset.doc); refocus('rese-sup'); };
+  /** The form's Document facts onto the document: issuance keeps what the form doesn't show (references nobody matched yet);
+      applicability keeps only what its level names. Empty facts are removed. */
+  function writeFacts(d, f) {
+    const iss = { ...(d.issuance || {}), number: f.number.trim(), issued: fromDay(f.issued), effective: fromDay(f.effective), issuer: conceptById(f.issuer) ? f.issuer : '', supersedes: [...f.supersedes] };
+    Object.keys(iss).forEach(k => { const v = iss[k]; if (v == null || v === '' || (Array.isArray(v) && !v.length)) delete iss[k]; });
+    if (Object.keys(iss).length) d.issuance = iss; else delete d.issuance;
+    const level = f.level;
+    if (!level) { delete d.applicability; return; }
+    const cohorts = level === 'cohort' ? [...new Set(f.cohorts.split(/\D+/).filter(Boolean).map(Number).filter(y => y >= 1900 && y <= 2100))] : [];
+    d.applicability = { ...(d.applicability || {}), level, units: level === 'unit' ? [...f.units] : [], programs: ['program', 'cohort'].includes(level) ? [...f.programs] : [], cohorts };
+  }
   A['res-edit-go'] = async () => {
     const f = ui('resEdit'), d = docById(f.id); if (f.busy || !d) return;
     f.touched = true;
     if (!f.name.trim()) { refreshLayer(); $('#rese-name')?.focus(); return; }
-    const keys = ['name', 'topics', 'lang', 'summary', 'owner', 'classifiedBy'], prev = Object.fromEntries(keys.map(k => [k, Array.isArray(d[k]) ? [...d[k]] : d[k]]));
+    const prev = Object.fromEntries(EDIT_KEYS.map(k => [k, d[k] === undefined ? undefined : clone(d[k])]));
     f.busy = true; S.modal.props.guard = true; refreshLayer(); await sleep(400);
-    const ext = d.name.slice(docTitle(d).length), before = res(d).topics;
-    // A person changing topics the pipeline chose is a correction the topics can learn from (Topics → Suggestions).
-    const retagged = String(before) !== String(f.topics), c = retagged && topicsByPipeline(d) ? recordCorrection(d, before, f.topics) : null;
-    Object.assign(d, { name: f.name.trim() + ext, topics: [...f.topics], lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined }, retagged ? { classifiedBy: 'person' } : {});
+    const ext = d.name.slice(docTitle(d).length);
+    // Only the schemes the editor changed are set — what they kept there becomes theirs; the others stay as they were,
+    // suggestions still awaiting review.
+    const changed = classSchemes().map(s => s.id).filter(s => String(f.start[s] || []) !== String(f.concepts[s] || []));
+    const before = docAssignments(d).map(a => a.id), machine = classifiedByPipeline(d), proposals = clone(D.conceptProposals || []);
+    let c = null;
+    if (changed.length) {
+      setDocConcepts(d, changed.flatMap(s => f.concepts[s] || []), { schemes: changed });
+      // A person changing concepts the pipeline chose is a correction classification learns from (Classification › Suggestions).
+      if (machine) c = recordCorrection(d, before, docAssignments(d).map(a => a.id));
+      d.classifiedBy = 'person';
+    }
+    Object.assign(d, { name: f.name.trim() + ext, lang: f.lang, summary: f.summary.trim() || undefined, owner: f.owner.trim() || undefined });
     if (!d.summary) delete d.summary; if (!d.owner) delete d.owner;
+    if (factsOffered(d)) writeFacts(d, f);
     audit('Edited resource details', d.name); closeModal(); refresh();
-    toast('Details saved', { action: { label: 'Undo', run: () => { keys.forEach(k => { if (prev[k] === undefined) delete d[k]; else d[k] = prev[k]; }); if (c) D.classCorrections = D.classCorrections.filter(x => x !== c); refresh(); } } });
+    toast('Details saved', { action: { label: 'Undo', run: () => {
+      EDIT_KEYS.forEach(k => { if (prev[k] === undefined) delete d[k]; else d[k] = prev[k]; });
+      if (c) { D.reviewCorrections = (D.reviewCorrections || []).filter(x => x !== c); D.conceptProposals = proposals; }
+      refresh();
+    } } });
   };
 
   /* ── Link to spaces (space staff / admins) ── */

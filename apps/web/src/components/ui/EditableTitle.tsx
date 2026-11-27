@@ -11,7 +11,7 @@ export interface EditableTitleProps {
    * keeps the field open with it (a name already taken); returning nothing closes it.
    */
   onCommit: (value: string) => string | void | Promise<string | void>;
-  /** Accessible name and tooltip of the pencil ("Rename topic"). */
+  /** Accessible name and tooltip of the pencil ("Rename concept"). */
   label?: string;
   /** `span` inside a heading or description that is already one (a drawer's title, its description). */
   as?: "h1" | "h2" | "h3" | "span";

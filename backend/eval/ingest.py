@@ -1,19 +1,18 @@
-"""Ingestion benchmark: upload a folder through the public API, process it in one run, measure it.
+"""Ingestion phase of ``eval bench``: upload a suite's files through the public API, process them in one run, measure it.
 
 The files go in as a user's upload does (CreateItem, the signed upload URL,
 CompleteItemUpload) into a new Collection, then one explicit ingestion run
-processes them in the running ingestion worker. Timings come from the run's
-tasks and their phases; outputs from the API (Structured Document size), the
-index (chunks), object storage (what the run stored per file) and the
-Original preview (how well each chunk's citation highlights mark its text,
-:mod:`eval.highlights`). The new Collection is the scope ``generate`` draws an
-accuracy dataset from.
+processes them in the running ingestion worker. The suite's previous
+Collection is deleted first, so a suite has one live Collection. Timings come
+from the run's tasks and their phases; outputs from the API (Structured
+Document size), the index (chunks), object storage (what the run stored per
+file) and the Original preview (how well each chunk's citation highlights mark
+its text, :mod:`eval.highlights`).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import mimetypes
 import time
 from collections import Counter, defaultdict
@@ -31,7 +30,7 @@ from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemRevision
 from bomesh.runtime import AppRuntime
 from bomesh.storage.keys import file_prefix
-from eval.highlights import check_document, render_highlights_markdown, summarize_highlights
+from eval.highlights import check_document
 from eval.metrics import mean, percentile
 from eval.report import markdown_table
 
@@ -41,39 +40,37 @@ _TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED"}
 
 @dataclass(frozen=True, slots=True)
 class IngestOptions:
-    folder: Path
-    limit: int | None
+    files: Sequence[Path]
     api_url: str
     email: str
     password: str
     workspace: str
     collection_name: str
+    #: The suite's previous Collection, deleted (with its documents) before the new one is made.
+    previous_collection: str | None = None
     read_images: bool = False
     poll_seconds: float = 2.0
 
 
-def folder_files(folder: Path) -> list[Path]:
-    """The folder's files in name order (hidden files skipped): the benchmark's order."""
-
-    return sorted(path for path in folder.iterdir() if path.is_file() and not path.name.startswith("."))
-
-
 async def run_ingest(runtime: AppRuntime, options: IngestOptions) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    everything = folder_files(options.folder)
-    files = everything[: options.limit] if options.limit else everything
-    if not files:
-        raise SystemExit(f"no files in {options.folder}")
+    if not options.files:
+        raise SystemExit("the suite has no files")
     base = options.api_url.rstrip("/") + "/api/v1"
     async with httpx.AsyncClient(base_url=base, timeout=300) as api, httpx.AsyncClient(timeout=300) as raw:
         token = (await _ok(api.post("/sessions", json={"credential": {"password": {
             "email": options.email, "password": options.password}}})))["accessToken"]
         api.headers["Authorization"] = f"Bearer {token}"
         workspace = await _workspace(api, options.workspace)
+        if options.previous_collection:
+            deleted = await api.delete(f"/{options.previous_collection}", params={"force": "true"})
+            if deleted.is_error and deleted.status_code != 404:
+                raise SystemExit(f"DeleteItem {options.previous_collection}: {deleted.status_code} {deleted.text}")
+            print(f"deleted the previous collection {options.previous_collection}")
         collection = await _ok(api.post(f"/{workspace}/items", json={
             "itemKind": "COLLECTION", "displayName": options.collection_name}))
         print(f"collection {collection['name']} ({options.collection_name})")
 
-        rows = [await _upload(api, raw, workspace, collection["name"], path) for path in files]
+        rows = [await _upload(api, raw, workspace, collection["name"], path) for path in options.files]
         uploaded = [row["item"] for row in rows if row.get("content_state") == "AVAILABLE"]
         if not uploaded:
             raise SystemExit("no file uploaded")
@@ -88,14 +85,8 @@ async def run_ingest(runtime: AppRuntime, options: IngestOptions) -> tuple[list[
                 row.update(_task_timing(task))
                 row.update(await _api_outputs(api, row["item"]))
         await _stored_outputs(runtime, workspace.split("/")[-1], rows)
-    summary = _summary(rows, run, everything, files)
-    summary.update(
-        source=str(options.folder),
-        workspace=workspace,
-        collection=collection["name"],
-        run=run["name"],
-        read_images=options.read_images,
-    )
+    summary = _summary(rows, run)
+    summary.update(workspace=workspace, collection=collection["name"], run=run["name"], read_images=options.read_images)
     return rows, summary
 
 
@@ -205,7 +196,7 @@ async def _api_outputs(api: httpx.AsyncClient, item: str) -> dict[str, Any]:
     outputs: dict[str, Any] = {
         "indexing_state": document.get("indexingState"),
         "language": document.get("languageCode"),
-        "assistant_topics": len(document.get("assistantTopics", [])),
+        "concepts": len(document.get("concepts", [])),
         "has_summary": bool(document.get("summary")),
     }
     content = await api.get(f"/{item}/content", params={"pageSize": 1})
@@ -247,8 +238,6 @@ async def _stored_outputs(runtime: AppRuntime, tenant_id: str, rows: list[dict[s
 def _summary(
     rows: list[dict[str, Any]],
     run: dict[str, Any],
-    everything: Sequence[Path],
-    files: Sequence[Path],
 ) -> dict[str, Any]:
     processed = [row for row in rows if row.get("task_seconds") is not None]
     run_seconds = _seconds(run.get("createTime"), run.get("endTime"))
@@ -283,15 +272,8 @@ def _summary(
         for kind, value in row.get("objects", {}).items():
             stored[kind]["count"] += value["count"]
             stored[kind]["bytes"] += value["bytes"]
-    folder_counts = Counter(path.suffix.casefold() or "(none)" for path in everything)
-    overall = mean(row["task_seconds"] for row in processed) or 0.0
-    upload = mean(row["upload_seconds"] for row in rows if "upload_seconds" in row) or 0.0
-    estimate = sum(
-        count * ((by_extension.get(extension) or {}).get("mean_task_seconds") or overall)
-        for extension, count in folder_counts.items()
-    ) / max(parallelism, 1.0)
     return {
-        "files": len(files),
+        "files": len(rows),
         "states": dict(Counter(row.get("task_state") or "NOT_PROCESSED" for row in rows)),
         "error_classes": dict(Counter(row["error_class"] for row in rows if row.get("error_class"))),
         "megabytes": sum(row["size_bytes"] for row in rows) / 1e6,
@@ -315,25 +297,16 @@ def _summary(
             "structure_nodes": sum(row.get("structure_nodes") or 0 for row in rows),
             "objects": dict(stored),
         },
-        "highlights": summarize_highlights(rows),
-        "folder": {
-            "files": len(everything),
-            "megabytes": sum(path.stat().st_size for path in everything) / 1e6,
-            "by_extension": dict(folder_counts),
-            "estimated_run_seconds": round(estimate, 1),
-            "estimated_upload_seconds": round(upload * len(everything), 1),
-        },
     }
 
 
-def render_ingest_markdown(rows: list[dict[str, Any]], summary: dict[str, Any], *, title: str) -> str:
+def render_ingest_markdown(rows: list[dict[str, Any]], summary: dict[str, Any]) -> list[str]:
     def number(value: Any, digits: int = 1) -> str:
         return "—" if value is None else f"{value:.{digits}f}"
 
-    folder = summary["folder"]
     lines = [
-        f"# {title}", "",
-        f"Folder `{summary['source']}` · collection `{summary['collection']}` · run `{summary['run']}` ({summary['run_state']})", "",
+        "## Ingestion", "",
+        f"Collection `{summary['collection']}` · run `{summary['run']}` ({summary['run_state']})", "",
     ]
     lines += markdown_table(
         ["Files", "MB", "States", "Upload s", "Run s", "First task wait s", "Docs/min", "Parallelism",
@@ -347,7 +320,7 @@ def render_ingest_markdown(rows: list[dict[str, Any]], summary: dict[str, Any], 
             number(summary["task_seconds"]["p95"]), number(summary["task_seconds"]["max"]),
         ]],
     )
-    lines += ["## Phases", ""]
+    lines += ["### Phases", ""]
     lines += markdown_table(
         ["Phase", "Documents", "Total s", "Mean s", "p50 s", "p95 s", "Share of task time"],
         [[phase, str(v["documents"]), number(v["total_seconds"]), number(v["mean_seconds"], 2),
@@ -355,7 +328,7 @@ def render_ingest_markdown(rows: list[dict[str, Any]], summary: dict[str, Any], 
           "—" if v["share"] is None else f"{100 * v['share']:.0f}%"]
          for phase, v in summary["phases"].items()],
     )
-    lines += ["## By file type", ""]
+    lines += ["### By file type", ""]
     lines += markdown_table(
         ["Type", "Files", "Succeeded", "MB", "Mean task s", "Max task s", "Mean chunks"],
         [[extension, str(v["files"]), str(v["succeeded"]), number(v["megabytes"], 2),
@@ -363,15 +336,14 @@ def render_ingest_markdown(rows: list[dict[str, Any]], summary: dict[str, Any], 
          for extension, v in summary["by_extension"].items()],
     )
     outputs = summary["outputs"]
-    lines += ["## Outputs", "",
+    lines += ["### Outputs", "",
               (f"{outputs['chunks']} chunks ({outputs['chunk_characters']:,} characters), "
                f"{outputs['structure_nodes']} Structured Document nodes."), ""]
     lines += markdown_table(
         ["Stored object", "Count", "MB"],
         [[kind, str(v["count"]), number(v["bytes"] / 1e6, 2)] for kind, v in sorted(outputs["objects"].items())],
     )
-    lines += ["", *render_highlights_markdown(summary["highlights"]), ""]
-    lines += ["## Documents", ""]
+    lines += ["### Documents", ""]
     lines += markdown_table(
         ["File", "KB", "State", "Task s", *[phase.title() for phase in PHASES], "Nodes", "Chunks", "Error"],
         [[row["file"], f"{row['size_bytes'] / 1024:.0f}", row.get("task_state") or "—",
@@ -381,26 +353,7 @@ def render_ingest_markdown(rows: list[dict[str, Any]], summary: dict[str, Any], 
           (row.get("error_class") or "") + (f": {row['error']}" if row.get("error") else "")]
          for row in rows],
     )
-    lines += [
-        "## Estimate for the whole folder", "",
-        f"{folder['files']} files ({folder['megabytes']:.1f} MB): about "
-        f"{folder['estimated_run_seconds'] / 60:.1f} min of processing at the measured parallelism "
-        f"({summary['parallelism']:.2f}), plus {folder['estimated_upload_seconds'] / 60:.1f} min of "
-        "sequential upload. Per type, from the mean task time measured here (the overall mean for "
-        "types not in the sample): "
-        + ", ".join(f"{extension} {count}" for extension, count in sorted(folder["by_extension"].items())),
-        "",
-    ]
-    return "\n".join(lines)
+    return lines
 
 
-def write_ingest_run(directory: Path, *, rows: list[dict[str, Any]], summary: dict[str, Any], title: str) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    with (directory / "results.jsonl").open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    (directory / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", "utf-8")
-    (directory / "summary.md").write_text(render_ingest_markdown(rows, summary, title=title), "utf-8")
-
-
-__all__ = ["IngestOptions", "folder_files", "render_ingest_markdown", "run_ingest", "write_ingest_run"]
+__all__ = ["IngestOptions", "render_ingest_markdown", "run_ingest"]

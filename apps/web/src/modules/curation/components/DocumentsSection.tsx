@@ -31,15 +31,16 @@ import { fmtDateTime, fmtNum, plural, rel } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
 import { useSources } from "@/modules/ingestion/queries";
-import { getSource, listAllItems, listItems, type Item } from "@/modules/knowledge/api";
+import { getSource, listAllItems, listItems, type DocumentConcept, type Item } from "@/modules/knowledge/api";
+import { ConceptTag } from "@/modules/knowledge/components/ConceptTag";
 import { openContribute } from "@/modules/knowledge/components/contribute-store";
 import { ProcessingChip } from "@/modules/knowledge/components/LifecycleChip";
-import { TopicTag } from "@/modules/knowledge/components/TopicTag";
-import { DOC_TYPES, docTypeOptions, topicTree, type DocTypeId } from "@/modules/knowledge/model";
+import { DOC_TYPES, docTypeOptions, type DocTypeId } from "@/modules/knowledge/model";
 import { knowledgeKeys, useItem, useKnowledgeBases, useKnowledgeModel, useMemberNames } from "@/modules/knowledge/queries";
+import { classSchemes, conceptLabel, conceptsOf, conceptState, docAssignments, schemeLabel, schemeOfConcept } from "@/modules/knowledge/taxonomy";
 
 import { pageContributionsOf, type IngestionRun } from "../api";
-import { DOC_FACETS, docQueryOf, documentFilter, listFilter, type DocFacet, type DocQuery } from "../docFilter";
+import { conceptParam, DOC_FACETS, docQueryOf, documentFilter, listFilter, type DocFacet, type DocQuery } from "../docFilter";
 import { canProcess, isCandidate, PROCESSING_ORDER, type PublicationKey } from "../lifecycle";
 import {
   canUnpublishRow,
@@ -222,8 +223,8 @@ function QualityList({ part, counts }: { part: QualityPart; counts: DocCounts | 
   );
 }
 
-const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Kho tài liệu", pub: "Công bố", src: "Nguồn gốc", type: "Loại", topic: "Chủ đề" };
-const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", type: "", topic: "", q: "" };
+const FACET_LABEL: Readonly<Record<DocFacet, string>> = { kb: "Kho tài liệu", pub: "Công bố", src: "Nguồn gốc", type: "Loại", concept: "Khái niệm" };
+const NO_QUERY: Record<keyof DocQuery, string> = { processing: "", kb: "", pub: "", src: "", type: "", concept: "", q: "" };
 
 /** Publication as a quiet line with its icon (preview `pubCell`). */
 const PUB_ICON: Readonly<Record<PublicationKey, LucideIcon>> = { published: Eye, unpublished: EyeOff, review: Clock, changes: Pencil, rejected: CircleX };
@@ -233,11 +234,11 @@ const settled = (r: DocRow) => r.publication === "published" || r.publication ==
 /**
  * Documents → All (preview `documentsTab`): the one administrative registry of every document in the collections
  * the caller looks after, whatever its origin, read a page at a time from ListItems with the filters as its AIP-160
- * `filter` (`../docFilter`). Search and Collection, Publication, Origin, Type, Topic and Processing in the toolbar, and
+ * `filter` (`../docFilter`). Search and Collection, Publication, Origin, Type, Concept and Processing in the toolbar, and
  * the Quality menu (Re-verification due · Missing details · Possible duplicates, with counts) that switches All to that
  * list (`?quality=`). Selecting rows offers Process · Publish · Unpublish · Archive; with the whole page selected,
  * "Select all matching" makes the filter the selection.
- * URL: `?view=all &processing= &kb= &pub= &src= &type= &topic= &q= &quality= &sel=`.
+ * URL: `?view=all &processing= &kb= &pub= &src= &type= &concept= &q= &quality= &sel=`.
  */
 function AllView({ counts }: { counts: DocCounts | undefined }) {
   const { id: ws } = useWorkspace();
@@ -247,7 +248,7 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   const params = useSearchParams();
   const bases = useKnowledgeBases();
   const sources = useSources();
-  const { ctx, topics } = useKnowledgeModel();
+  const { ctx, taxonomy } = useKnowledgeModel();
   const ops = useDocOps();
 
   /* ── URL state → the filter ── */
@@ -340,10 +341,15 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
   ];
   // Type: the file class (`itemType`), derived from the file; any class a document can have.
   const typeOpts = docTypeOptions(Object.keys(DOC_TYPES) as DocTypeId[]);
-  const topicOpts: [string, string][] = topicTree(topics).flatMap((d) => [
-    [resourceId(d.name), d.displayName ?? ""] as [string, string],
-    ...d.children.map((t) => [resourceId(t.name), `${d.displayName} · ${t.displayName}`] as [string, string]),
-  ]);
+  // Concept: the published concepts of the classification schemes, by scheme (named when there are several), then by name.
+  const classification = classSchemes(taxonomy);
+  const conceptOpts: [string, string][] = classification.flatMap((s) =>
+    conceptsOf(taxonomy, s.name ?? "")
+      .filter((c) => conceptState(c) === "PUBLISHED")
+      .map((c) => [c.name ?? "", conceptLabel(taxonomy, c.name)] as const)
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([name, label]) => [conceptParam(name), classification.length > 1 ? `${schemeLabel(s)} · ${label}` : label] as [string, string]),
+  );
   const facetOpts: Readonly<Record<DocFacet, [string, string][]>> = {
     kb: kbOpts,
     pub: [
@@ -352,12 +358,12 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
     ],
     src: originOpts,
     type: typeOpts,
-    topic: topicOpts,
+    concept: conceptOpts,
   };
-  const facetValue = (k: DocFacet) => resourceId(query[k]) || query[k];
+  const facetValue = (k: DocFacet) => (k === "concept" ? conceptParam(query.concept) : resourceId(query[k]) || query[k]);
   const facets = DOC_FACETS.filter((k) => facetOpts[k].length > 1 || query[k]).map((k) => [k, FACET_LABEL[k], facetOpts[k]] as const);
   const nSet = DOC_FACETS.filter((k) => query[k]).length;
-  const clearFacets = () => setParam({ kb: "", pub: "", src: "", type: "", topic: "", processing: "" });
+  const clearFacets = () => setParam({ kb: "", pub: "", src: "", type: "", concept: "", processing: "" });
   const sortLabel = sort.column === "name" ? "Tên" : "Mới cập nhật";
   const procOpts = PROCESSING_ORDER.map((k) => ({ value: k, label: msg.state.processing[k].label }));
   const qualityTotal = counts ? qualityCount(counts) : 0;
@@ -423,24 +429,37 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
       },
     },
     {
-      id: "topics",
-      header: "Chủ đề",
+      id: "concepts",
+      header: "Phân loại",
       hideOnMobile: true,
       cell: (r) => {
+        // Its classification and who chose it (preview `conceptCell`): the primary concept of the first scheme as its tag,
+        // +n for the rest (names in the tooltip). A submission's is the assistant's once it's processed.
         const inReview = r.publication === "review" || r.publication === "changes";
-        if (!r.topics.length) {
-          const none = r.processing === "failed" ? "Chưa phân loại: không có văn bản để đọc" : inReview ? "Đang phân loại…" : r.processing === "pending" ? "Phân loại khi được xử lý" : "Chưa có chủ đề";
-          return <span className="cur-topic-cell is-none">{none}</span>;
+        const classified = !inReview || r.processing === "ready";
+        const order = classification.map((s) => s.name ?? "");
+        const schemeOf = (a: DocumentConcept) => a.scheme ?? schemeOfConcept(a.concept ?? "");
+        const list = (classified ? docAssignments(taxonomy, r.assignments) : [])
+          .filter((a) => !a.section && order.includes(schemeOf(a)))
+          .sort((a, b) => order.indexOf(schemeOf(a)) - order.indexOf(schemeOf(b)) || Number(!!b.primary) - Number(!!a.primary));
+        if (!list.length) {
+          const none =
+            r.processing === "failed" ? "Chưa phân loại: không có văn bản để đọc" : r.processing === "pending" ? "Phân loại khi được xử lý" : inReview ? "Đang phân loại…" : "Chưa có khái niệm";
+          return <span className="cur-concept-cell is-none">{none}</span>;
         }
-        const assistant = r.item?.document?.assistantTopics ?? [];
-        const by = inReview ? "Được đề xuất" : r.topics.every((t) => assistant.includes(t)) ? "Trợ lý" : "Do người chọn";
-        const labels = r.topics.map((t) => ctx.topicNames?.get(t) ?? "Chủ đề chưa đặt tên");
+        const by = inReview
+          ? "Được đề xuất"
+          : list.some((a) => a.state === "SUGGESTED")
+            ? "Chờ duyệt"
+            : list.every((a) => a.source !== "HUMAN")
+              ? "Trợ lý"
+              : "Do người chọn";
+        const rest = list.slice(1).map((a) => conceptLabel(taxonomy, a.concept));
         return (
-          <div className="stack gap-2 cur-topic-cell">
-            {/* The first topic as its tag, +n for the rest (names in the tooltip). */}
-            <span className="cur-topic-tags">
-              <TopicTag label={labels[0]} look={ctx.topicLooks?.get(r.topics[0])} />
-              {labels.length > 1 ? <span className="cur-topic-more" title={labels.slice(1).join(", ")}>{`+${labels.length - 1}`}</span> : null}
+          <div className="stack gap-2 cur-concept-cell">
+            <span className="cur-concept-tags">
+              <ConceptTag taxonomy={taxonomy} concept={list[0].concept ?? ""} />
+              {rest.length ? <span className="cur-concept-more" title={rest.join(", ")}>{`+${rest.length}`}</span> : null}
             </span>
             <span className="cell-sub">{by}</span>
           </div>
@@ -530,9 +549,9 @@ function AllView({ counts }: { counts: DocCounts | undefined }) {
                 value: facetValue(key),
                 options: [
                   { value: "", label: "Bất kỳ" },
-                  // Collection, topic and source names are workspace data; "Uploads and contributions" and the
+                  // Collection, concept and source names are workspace data; "Uploads and contributions" and the
                   // "Source sync" fallback are UI copy.
-                  ...opts.map(([value, l]) => ({ value, label: l, data: key === "kb" || key === "topic" || (key === "src" && value !== "upload" && l !== "Đồng bộ nguồn dữ liệu") })),
+                  ...opts.map(([value, l]) => ({ value, label: l, data: key === "kb" || key === "concept" || (key === "src" && value !== "upload" && l !== "Đồng bộ nguồn dữ liệu") })),
                 ],
                 onChange: (v: string) => setParam({ [key]: v }),
               })),

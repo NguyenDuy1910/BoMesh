@@ -32,7 +32,7 @@ from bomesh.connector.protocol import (
 )
 from bomesh.db.engine import transaction_scope
 from bomesh.db.models import Item, ItemIndexState, ItemRevision
-from bomesh.document_index import ClassificationRequest, IndexingContext
+from bomesh.document_index import IndexingContext
 from bomesh.document_structure import (
     Highlight,
     StructureManifest,
@@ -45,6 +45,8 @@ from bomesh.document_structure import (
 from bomesh.runtime import AppRuntime
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.indexing import ItemIngestionService
+from bomesh.services.taxonomy.assignments import rule_placement
+from bomesh.services.taxonomy.classification import ClassificationPlan
 from bomesh.storage.keys import content_key, new_content_id
 from harness import ApiClient, Fakes, Sessions
 
@@ -152,11 +154,13 @@ class Knowledge:
         texts: Sequence[str],
         *,
         highlights: tuple[Highlight, ...] = (),
-        classification: ClassificationRequest | None = None,
+        plan: ClassificationPlan | None = None,
     ) -> list[str]:
         """Index ``texts`` as chunks ``{item}:{n}`` of ``document`` (its current payload
         state), each citing paragraph ``texts/{n}`` of a Structured Document stored for
-        its current revision, marked SUCCEEDED for that revision; returns the chunk IDs."""
+        its current revision, marked SUCCEEDED for that revision; returns the chunk IDs.
+        With a ``plan`` the document is classified as a run classifies it (its
+        collections and source match rules)."""
         page = highlights[0].page if highlights else None
         version = await self.store_structure(document, paragraphs(texts, page=page))
         async with transaction_scope(self.sessions) as session:
@@ -170,6 +174,7 @@ class Knowledge:
             collection = path[-1]
             revision = await ItemService(session).current_revision(document.id)
             assert revision is not None
+            ancestor_ids, source_id = await rule_placement(session, row)
         canonical = DocumentItem(
             id=str(row.id),
             title=row.item_name,
@@ -207,7 +212,9 @@ class Knowledge:
                 structure_version=version,
             ),
             processed_version=self.runtime.processing_version(),
-            classification=classification,
+            plan=plan,
+            ancestor_ids=ancestor_ids,
+            source_id=source_id,
         )
         return [chunk.id for chunk in chunks]
 

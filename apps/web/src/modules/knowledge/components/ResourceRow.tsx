@@ -9,13 +9,14 @@ import { FileIcon } from "@/components/ui/FileIcon";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { relInline } from "@/lib/format";
 
-import { catalogHref, indexStatusOf, type Resource } from "../model";
+import { conceptHref, conceptOrder, indexStatusOf, type Resource } from "../model";
 import { openDocumentPreview } from "../preview/store";
 import { useKnowledgeModel } from "../queries";
 import { HighlightText } from "./HighlightText";
 import { ResourceMenu, SaveButton } from "./ResourceActions";
 import { SourceIcon } from "./SourceIcon";
-import { TopicTag } from "./TopicTag";
+import { conceptLabel } from "../taxonomy";
+import { ConceptTag } from "./ConceptTag";
 import { TrustChip } from "./TrustChip";
 
 /** The middle dot between meta parts. */
@@ -44,21 +45,23 @@ export function onActivateKey(open: () => void) {
   };
 }
 
-/** Topic shortcuts (preview `topicChips`): colored tags linking to Browse filtered by the topic. */
-export function TopicChips({ topics, max = 2 }: { topics: readonly string[]; max?: number }) {
-  const { ctx } = useKnowledgeModel();
-  const shown = topics.slice(0, max);
-  if (!shown.length) return null;
+/** A row's concepts (preview `conceptChips`): at most `max` tags in reading order, each a link to Browse filtered to it, the
+ *  rest as +n with their names in its tooltip. */
+export function ConceptChips({ resource: r, max = 2 }: { resource: Resource; max?: number }) {
+  const { taxonomy } = useKnowledgeModel();
+  const ids = conceptOrder(taxonomy, r.assignments);
+  const rest = ids.slice(max);
+  if (!ids.length) return null;
   return (
-    <span className="res-topics" onClick={stop}>
-      {shown.map((name) => (
-        <TopicTag
-          key={name}
-          label={ctx.topicNames?.get(name) ?? "Chủ đề chưa đặt tên"}
-          look={ctx.topicLooks?.get(name)}
-          href={catalogHref({ filters: { topic: [name.slice(name.lastIndexOf("/") + 1)] } })}
-        />
+    <span className="res-concepts" onClick={stop}>
+      {ids.slice(0, max).map((c) => (
+        <ConceptTag key={c} taxonomy={taxonomy} concept={c} href={conceptHref(c)} />
       ))}
+      {rest.length ? (
+        <span className="res-concepts__more" title={rest.map((c) => conceptLabel(taxonomy, c)).join(", ")} translate="no">
+          {`+${rest.length}`}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -85,13 +88,13 @@ export interface ResourceRowProps {
   read?: boolean;
   /** Context every row in the list shares (a collection's own page, My files), so it isn't repeated: `["kb"]`. */
   hide?: readonly "kb"[];
-  /** One-line row without summary or topics. */
+  /** One-line row without summary or concepts. */
   compact?: boolean;
 }
 
 /**
  * Rich list row (preview `X.res.row`): file tile, title + trust, type · collection · updated, summary or
- * search snippet, topics. Save and ⋯ appear on hover or keyboard focus (always on touch); a saved bookmark
+ * search snippet, concepts. Save and ⋯ appear on hover or keyboard focus (always on touch); a saved bookmark
  * stays visible. The whole row opens the preview, Enter/Space too.
  */
 export function ResourceRow({
@@ -170,7 +173,7 @@ export function ResourceRow({
             <HighlightText text={about} q={q} />
           </span>
         ) : null}
-        {compact ? null : <TopicChips topics={r.topics} />}
+        {compact ? null : <ConceptChips resource={r} />}
       </span>
       <span className="res-row__trail" onClick={stop} onKeyDown={stop}>
         {trail}

@@ -82,6 +82,7 @@ def _agent_split(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "false_abstention": share(answerable, "abstained"),
         "unanswerable_abstained": share(unanswerable, "abstained"),
         "unanswerable_correct": share(unanswerable, "correct"),
+        "unanswerable_cited": share(unanswerable, "cited"),
         "mean_tool_calls": mean(len(row.get("tool_calls", ())) for row in rows),
     }
 
@@ -106,20 +107,20 @@ def _by_type(rows: list[dict[str, Any]], k: int | None) -> dict[str, Any]:
     return result
 
 
-def render_markdown(summary: dict[str, Any], *, title: str) -> str:
+def render_markdown(summary: dict[str, Any]) -> list[str]:
     variants = list(summary["variants"])
     stages = summary["stages"]
-    lines = [f"# {title}", ""]
+    lines = ["## Retrieval and answers", ""]
 
     def value(variant: str, stage: str, key: str, *, scale: float = 1.0, digits: int = 3) -> str:
         found = stages.get(variant, {}).get(stage, {}).get(key)
         return "–" if found is None else f"{found * scale:.{digits}f}"
 
-    lines += ["## Settings", ""]
+    lines += ["### Settings", ""]
     if summary.get("judge_model"):
         lines += [f"Judge model: `{summary['judge_model']}`", ""]
     lines += markdown_table(
-        ["Variant", "Rerank", "Candidates", "Final k", "Agent model", "Reranker model",
+        ["Variant", "Rerank", "Candidates", "Final k", "Context chunks", "Agent model", "Reranker model",
          "Rerank fallbacks"],
         [
             [
@@ -127,6 +128,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
                 str(settings["reranking_enabled"]),
                 str(settings["candidate_count"]),
                 str(settings["final_top_k"]),
+                str(settings.get("context_chunks", 0)),
                 str(settings["agent_model"]),
                 str(settings["reranker_model"]),
                 str(settings.get("rerank_fallbacks", "–")),
@@ -136,7 +138,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
     )
 
     if any("fused" in stages.get(v, {}) for v in variants):
-        lines += ["## Retrieval: fused hybrid candidates (dense + BM25, RRF)", ""]
+        lines += ["### Retrieval: fused hybrid candidates (dense + BM25, RRF)", ""]
         lines += markdown_table(
             ["Variant", "n", "Hit@1", "Hit@5", "Recall@10", "Recall@20", "MRR", "nDCG@10",
              "DocHit@5", "Judged nDCG@10", "p50 ms", "p95 ms", "Errors"],
@@ -161,7 +163,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
         )
 
     if any("final" in stages.get(v, {}) for v in variants):
-        lines += ["## Retrieval: final evidence given to the agent", ""]
+        lines += ["### Retrieval: final evidence given to the agent", ""]
         rows = []
         for v in variants:
             k = summary["variants"][v]["final_top_k"]
@@ -208,7 +210,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
 
     leak_stages = ("leak_collection", "leak_tenant")
     if any(stage in stages.get(v, {}) for v in variants for stage in leak_stages):
-        lines += ["## Permission leak probes (must be 0)", ""]
+        lines += ["### Permission leak probes (must be 0)", ""]
         lines += markdown_table(
             ["Variant", "Probe", "n", "Index violations", "Retriever violations", "Errors"],
             [
@@ -227,7 +229,7 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
         )
 
     if any("agent" in stages.get(v, {}) for v in variants):
-        lines += ["## Agent end to end", ""]
+        lines += ["### Agent end to end", ""]
         lines += markdown_table(
             ["Variant", "n", "Correct", "Mean correctness", "Grounded", "Cited",
              "Cited gold", "Searched", "Unanswerable abstained", "False abstention",
@@ -254,7 +256,22 @@ def render_markdown(summary: dict[str, Any], *, title: str) -> str:
                 for v in variants
             ],
         )
-    return "\n".join(lines) + "\n"
+        lines += ["### Grounding (lower is better, except Unanswerable correct)", ""]
+        lines += markdown_table(
+            ["Variant", "Off-topic citation", "Unsourced specifics", "Unanswerable cited",
+             "Unanswerable correct"],
+            [
+                [
+                    v,
+                    value(v, "agent", "off_topic_citation"),
+                    value(v, "agent", "unsourced_specifics"),
+                    value(v, "agent", "unanswerable_cited"),
+                    value(v, "agent", "unanswerable_correct"),
+                ]
+                for v in variants
+            ],
+        )
+    return lines
 
 
 def _type_cell(entry: dict[str, Any] | None, variant: str, summary: dict[str, Any]) -> str:
@@ -280,23 +297,23 @@ def markdown_table(header: list[str], rows: list[list[str]]) -> list[str]:
     ]
 
 
-def write_run(
+def write_report(
     directory: Path,
     *,
-    rows: list[dict[str, Any]],
     summary: dict[str, Any],
-    manifest: dict[str, Any],
-    title: str,
+    markdown: list[str],
+    documents: list[dict[str, Any]],
+    results: list[dict[str, Any]],
 ) -> None:
+    """One run directory: ``summary.md``, ``summary.json``, per-document rows and per-probe rows."""
+
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / "results.jsonl").open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    (directory / "summary.json").write_text(
-        json.dumps({**summary, "dataset": manifest}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (directory / "summary.md").write_text(render_markdown(summary, title=title), "utf-8")
+    for name, rows in (("documents.jsonl", documents), ("results.jsonl", results)):
+        with (directory / name).open("w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    (directory / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    (directory / "summary.md").write_text("\n".join(markdown) + "\n", "utf-8")
 
 
-__all__ = ["markdown_table", "render_markdown", "summarize", "write_run"]
+__all__ = ["markdown_table", "render_markdown", "summarize", "write_report"]

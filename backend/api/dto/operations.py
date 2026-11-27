@@ -120,6 +120,7 @@ def _metadata(operation: Operation, type_name: str) -> dict[str, Any]:
 _METADATA_RESOURCE_FIELDS = {
     "CreateWorkspaceMetadata": "workspace",
     "ArtifactOperationMetadata": "artifact",
+    "PublishConceptSchemeMetadata": "conceptScheme",
 }
 
 

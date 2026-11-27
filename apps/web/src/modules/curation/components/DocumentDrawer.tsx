@@ -25,10 +25,12 @@ import type { ReactNode } from "react";
 import { Callout, Disclosure, EmptyState, FileIcon, ItemIcon, KeyValue, type Tone } from "@/components/ui";
 import { resourceId } from "@/lib/api/client";
 import { fmtDateTime, fmtSize, plural, rel } from "@/lib/format";
+import { ConceptsByScheme, DocumentFacts } from "@/modules/knowledge/components/ConceptsByScheme";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { ResourceDetails } from "@/modules/knowledge/components/ResourceDetails";
 import { DOC_TYPES } from "@/modules/knowledge/model";
 import { useKnowledgeModel, useMemberNames, useSource } from "@/modules/knowledge/queries";
+import { acceptedConcepts, conceptLabel, docAssignments } from "@/modules/knowledge/taxonomy";
 
 import { useCollectionLabels } from "../collectionLabels";
 import { changedAtSource, inSearch, isCandidate } from "../lifecycle";
@@ -38,7 +40,7 @@ import { useActiveTasks, useCollectionAudience, useRunTask } from "../queries";
 import { TaskSteps } from "./ProcessingSteps";
 import { serverText } from "@/lib/i18n";
 import { CurationDrawer } from "./CurationDrawer";
-import { ActionsMenu, TopicMenu, useApplyTopic } from "./shared";
+import { ActionsMenu } from "./shared";
 import { OP_META, useDocOps } from "./useDocOps";
 
 const EVENTS: Readonly<Record<string, [LucideIcon, string, Tone | undefined]>> = {
@@ -111,8 +113,7 @@ const STEP_ICON: Readonly<Record<Step["state"], [LucideIcon, string]>> = {
 const STEP_SR: Readonly<Record<Step["state"], string>> = { done: "Xong", current: "Đang xử lý", issue: "Cần chú ý", skipped: "Đã bỏ qua", todo: "Chưa" };
 
 function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where: string; contributorName: string; onRun: (op: DocOp) => void }) {
-  const { toResource, ctx } = useKnowledgeModel();
-  const applyTopic = useApplyTopic();
+  const { toResource, taxonomy } = useKnowledgeModel();
   const c = row.contribution;
   const events = (c?.events ?? []).filter((e) => e.kind !== "ANALYZED");
   const memberNames = useMemberNames([...events.map((e) => e.actor), c?.decision?.reviewer, row.item?.creator]);
@@ -147,8 +148,10 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
   /* ── Progress: Received → Processed → Reviewed → Published → Searchable (a submission is processed before review) ── */
   const open = row.publication === "review" || row.publication === "changes";
   const kind = DOC_TYPES[row.type].label;
-  const topicNames = row.topics.map((t) => ctx.topicNames?.get(t) ?? "").filter(Boolean);
-  const canTag = !!resource && !open && resource.editable;
+  // What the pipeline chose: a submission's candidate carries the assistant's classification for its reviewer; any other
+  // document, what it's filed under.
+  const candidate = isCandidate(c);
+  const chosen = candidate ? docAssignments(taxonomy, row.assignments).map((a) => a.concept ?? "") : acceptedConcepts(docAssignments(taxonomy, row.assignments));
   const who = audience?.label ?? "Người đọc của kho tài liệu";
   const opButton = (op: DocOp | undefined) => {
     if (!op) return undefined;
@@ -192,7 +195,7 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
   const indexed = versionOf(row.item?.document?.indexedRevision) ?? versionOf(row.item?.document?.revision) ?? 1;
   const fix = processOp(row);
   const procBtn = opButton(fix === "process" || fix === "retry" || fix === "update" ? fix : undefined);
-  const what = `v${indexed} · ${kind} · ${topicNames.length ? topicNames.join(", ") : "chưa có chủ đề"}`;
+  const what = `${candidate ? "Đã phân loại để duyệt" : `v${indexed}`} · ${chosen.length ? `${kind} · ${chosen.map((n) => conceptLabel(taxonomy, n)).join(", ")}` : "không tìm thấy khái niệm"}`;
   const inFlight = live?.state === "QUEUED" || live?.state === "RUNNING";
   const task = live ?? lastFailed.data;
   const at = task ? procStepAt(procSteps(task)) : null;
@@ -202,13 +205,9 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
     </div>
   ) : undefined;
   const PROCESSED: Readonly<Record<DocRow["processing"], Omit<Step, "label">>> = {
-    pending: { state: "todo", text: "Chưa xử lý: tìm kiếm và trợ lý chưa dùng được", action: procBtn },
+    pending: { state: "todo", text: candidate ? "Chưa xử lý: hãy xử lý để trợ lý phân loại trước khi duyệt" : "Chưa xử lý: tìm kiếm và trợ lý chưa dùng được", action: procBtn },
     processing: { state: "current", busy: true, text: live?.state === "QUEUED" ? "Đang chờ bộ xử lý có chỗ trống" : at ? `Bước ${at.n}/${PROC_STEPS.length}` : "Đang đọc, phân loại và cho phép tra cứu…", action: taskSteps },
-    ready: {
-      state: "done",
-      text: what,
-      action: !topicNames.length && canTag ? <TopicMenu label="Thêm chủ đề" variant="tertiary" chevron onPick={(t) => void applyTopic([resource!], t)} /> : undefined,
-    },
+    ready: { state: "done", text: what },
     failed: {
       state: "issue",
       text: at ? `Lỗi ở bước ${at.label}: ${indexError || "dừng tại bước này"}` : indexError || "Quá trình xử lý dừng giữa chừng",
@@ -319,31 +318,36 @@ function DrawerBody({ row, where, contributorName, onRun }: { row: DocRow; where
         {resource && published ? (
           <ResourceDetails resource={resource} />
         ) : row.item ? (
-          <KeyValue
-            pairs={[
-              [
-                "Kho tài liệu",
-                row.base ? (
-                  <NextLink className="link" href={`/studio/collections/${resourceId(row.base)}`} translate="no">
-                    {where || "Kho tài liệu"}
-                  </NextLink>
-                ) : (
-                  "—"
-                ),
-              ],
-              ["Người gửi", contributorName || "—"],
-              ["Loại", kind],
-              ["Kích thước", fmtSize(row.item.document?.sizeBytes)],
-              ["Phiên bản", `v${versionOf(row.item.document?.revision) ?? 1}`],
-              [
-                "Ai có thể xem",
-                <span key="who" className="row gap-6">
-                  {audience ? <audience.icon className="i i-sm muted" aria-hidden /> : null}
-                  {who}
-                </span>,
-              ],
-            ]}
-          />
+          <>
+            <KeyValue
+              pairs={[
+                [
+                  "Kho tài liệu",
+                  row.base ? (
+                    <NextLink className="link" href={`/studio/collections/${resourceId(row.base)}`} translate="no">
+                      {where || "Kho tài liệu"}
+                    </NextLink>
+                  ) : (
+                    "—"
+                  ),
+                ],
+                ["Người gửi", contributorName || "—"],
+                ["Loại", kind],
+                ["Kích thước", fmtSize(row.item.document?.sizeBytes)],
+                ["Phiên bản", `v${versionOf(row.item.document?.revision) ?? 1}`],
+                [
+                  "Ai có thể xem",
+                  <span key="who" className="row gap-6">
+                    {audience ? <audience.icon className="i i-sm muted" aria-hidden /> : null}
+                    {who}
+                  </span>,
+                ],
+              ]}
+            />
+            {/* Its concepts once it's outside review (a submission's are the assistant's, in Review), then its document facts. */}
+            {row.publication === "unpublished" ? <ConceptsByScheme assignments={row.assignments} /> : null}
+            <DocumentFacts item={row.item} />
+          </>
         ) : (
           <EmptyState icon={FileGlyph} compact title="Tệp không khả dụng" description="Tệp đã được trả lại cho người gửi." />
         )}

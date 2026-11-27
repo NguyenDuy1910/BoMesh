@@ -12,13 +12,13 @@ export type CategoryTone = (typeof CATEGORY_TONES)[number];
 export const categoryTone = (key: string): CategoryTone => CATEGORY_TONES[hashOf(key) % CATEGORY_TONES.length];
 
 /**
- * A stable color for one of many kinds (topic domains): a hue hashed from `key`, skipping the red band status
- * owns, at the lightness and chroma of the category tones. Six tones are too few for dozens of domains.
+ * A stable color for one of many kinds (top concepts without a stored color): a hue hashed from `key`, skipping the red
+ * band status owns, at the lightness and chroma of the category tones. Six tones are too few for dozens of domains.
  */
 export const categoryColor = (key: string): string => `oklch(63% 0.15 ${45 + (hashOf(key) % 300)})`;
 
 /**
- * The colors people give topic domains (`Topic.color`, lowercase `#rrggbb`): twelve hues apart, mid-tone so their soft
+ * The colors people give top concepts (`Concept.color`, lowercase `#rrggbb`): twelve hues apart, mid-tone so their soft
  * tiles and tags read in light and dark, no status red. The label is the swatch's accessible name.
  */
 export const DOMAIN_COLORS: readonly { hex: string; label: string }[] = [
@@ -36,7 +36,8 @@ export const DOMAIN_COLORS: readonly { hex: string; label: string }[] = [
   { hex: "#4f5865", label: "Xám đá" },
 ];
 
-/** A new domain's color: the first palette color no domain uses (`used`: their colors); the palette repeats once all are taken. */
+/** A new top concept's color: the first palette color no top concept of its scheme uses (`used`: their colors); the
+ *  palette repeats once all are taken. */
 export function freeDomainColor(used: readonly (string | undefined)[]): string {
   const taken = new Set(used.flatMap((c) => (c ? [c.toLowerCase()] : [])));
   return (DOMAIN_COLORS.find((c) => !taken.has(c.hex)) ?? DOMAIN_COLORS[used.length % DOMAIN_COLORS.length]).hex;

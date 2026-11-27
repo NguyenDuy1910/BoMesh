@@ -45,7 +45,12 @@ if TYPE_CHECKING:
     from bomesh.runtime import AppRuntime
 
 Verb = Literal[
-    "createWorkspace", "exportAuditEvents", "exportUsage", "createArtifact", "reviseArtifact"
+    "createWorkspace",
+    "exportAuditEvents",
+    "exportUsage",
+    "createArtifact",
+    "reviseArtifact",
+    "publishConceptScheme",
 ]
 
 #: Finished operations are deleted this long after ``finished_at``.
@@ -66,6 +71,9 @@ OPERATION_TYPES: dict[str, OperationTypes] = {
     "exportUsage": OperationTypes("WorkspaceExportResponse", "WorkspaceExportMetadata"),
     "createArtifact": OperationTypes("Artifact", "ArtifactOperationMetadata"),
     "reviseArtifact": OperationTypes("Artifact", "ArtifactOperationMetadata"),
+    "publishConceptScheme": OperationTypes(
+        "ConceptSchemeVersion", "PublishConceptSchemeMetadata"
+    ),
 }
 
 

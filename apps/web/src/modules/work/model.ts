@@ -226,13 +226,13 @@ export function generationInstructions(kind: WorkKind, o: WorkOptions, { staffQu
 
 const stripExt = (n: string) => n.replace(/\.[a-z0-9]{1,5}$/i, "");
 /** "W3 — Sorting & searching.pdf" → "Sorting & searching". */
-function docTopic(name: string) {
+function docSubject(name: string) {
   const base = stripExt(name);
   return /^(.{1,16}?)\s+—\s+(.+)$/.exec(base)?.[2] ?? base;
 }
-function topicsLine(names: readonly string[]) {
-  if (names.length === 1) return docTopic(names[0]);
-  const short = names.slice(0, 2).map((n) => docTopic(n).split(" & ")[0].replace(/\s*\(.*?\)\s*/g, " ").trim());
+function subjectsLine(names: readonly string[]) {
+  if (names.length === 1) return docSubject(names[0]);
+  const short = names.slice(0, 2).map((n) => docSubject(n).split(" & ")[0].replace(/\s*\(.*?\)\s*/g, " ").trim());
   return short.join(" & ") + (names.length > 2 ? ` +${names.length - 2}` : "");
 }
 
@@ -240,8 +240,8 @@ export function defaultTitle(kind: WorkKind, { spaceName, docNames, options, sta
   if (kind === "EVIDENCE_REVIEW") return spaceName ? `${spaceName} — tổng hợp bằng chứng` : "Tổng hợp bằng chứng";
   if (kind === "DRAFT") return `${draftTypeLabel(options.type ?? "email")}${spaceName ? ` — ${spaceName}` : ""}`;
   if (!docNames.length) return kindMeta(kind).label;
-  if (kind === "STUDY_GUIDE") return `${topicsLine(docNames)} — tài liệu ôn tập`;
-  return staffQuiz ? `Bài kiểm tra — ${topicsLine(docNames)}` : `Luyện tập — ${topicsLine(docNames)}`;
+  if (kind === "STUDY_GUIDE") return `${subjectsLine(docNames)} — tài liệu ôn tập`;
+  return staffQuiz ? `Bài kiểm tra — ${subjectsLine(docNames)}` : `Luyện tập — ${subjectsLine(docNames)}`;
 }
 
 /* ═══════════════ Retry recipe ═══════════════ */

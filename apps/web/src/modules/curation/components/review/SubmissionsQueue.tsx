@@ -2,7 +2,7 @@
 
 import { Button, Checkbox } from "@heroui/react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleX, Tag } from "lucide-react";
+import { Check, CircleX } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -14,7 +14,8 @@ import { useWorkspace } from "@/lib/workspace";
 import { getContribution } from "@/modules/knowledge/api";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
 import { SourceIcon } from "@/modules/knowledge/components/SourceIcon";
-import { useMemberNames } from "@/modules/knowledge/queries";
+import { useMemberNames, useTaxonomy } from "@/modules/knowledge/queries";
+import { docAssignments, isClassification, schemeByName, schemeOfConcept } from "@/modules/knowledge/taxonomy";
 
 import { approveContribution, listContributionsPage, rejectContribution, requestContributionChanges } from "../../api";
 import { useCollectionLabels } from "../../collectionLabels";
@@ -22,7 +23,7 @@ import { flushDecisions, holdDecision, useHeldDecisions, type SendInit } from ".
 import { contributionsOf, REVIEW_READY, reviewFilter } from "../../docFilter";
 import { readyToReview } from "../../lifecycle";
 import { cleanName, FLAG_META, flagsOf, hasFlag, isAnalyzing, lastEvent, MANY, QUEUE_FILTER_FN, QUEUE_FILTERS, targetOf, type QueueFilter } from "../../model";
-import { analyzingKey, heldContributions, useAllTopics, useCounts, useInvalidateCuration, useReviewableBases, withCandidates, type Submission } from "../../queries";
+import { analyzingKey, heldContributions, useCounts, useInvalidateCuration, useReviewableBases, withCandidates, type Submission } from "../../queries";
 import { CompareDrawer } from "../CompareDrawer";
 import { DecideDialog, type DecideRequest } from "../DecideDialog";
 import { SourceName } from "../parts";
@@ -100,7 +101,7 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
   const pathname = usePathname();
   const params = useSearchParams();
   const held = useHeldDecisions();
-  const topics = useAllTopics();
+  const taxonomy = useTaxonomy().data;
   const bases = useReviewableBases();
   const invalidate = useInvalidateCuration();
 
@@ -289,19 +290,23 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
     return () => document.removeEventListener("keydown", onKey);
   }, [step, cur, router]);
 
-  /* ── Drafts: the reviewer's working copy of the assistant's suggestion ── */
+  /* ── Drafts: the reviewer's working copy of the assistant's classification and suggestions ── */
   const draftOf = (v: SubView | undefined): Draft | null => {
     if (!v || v.analyzing) return null;
     const c = v.sub.contribution;
+    // The candidate's whole-document concepts in the classification schemes: what the assistant chose while processing it.
+    const classified = docAssignments(taxonomy, v.sub.item?.document?.concepts)
+      .filter((a) => !a.section && isClassification(schemeByName(taxonomy, schemeOfConcept(a.concept ?? ""))))
+      .map((a) => a.concept ?? "");
     const existing = drafts[v.name];
-    if (existing && existing.etag === c.etag) return existing;
+    if (existing && existing.etag === c.etag && existing.classified.join() === classified.join()) return existing;
     return {
       etag: c.etag ?? "",
-      topics: [...(c.suggestions?.topics ?? [])],
+      classified,
+      concepts: classified,
       kb: baseOf(c),
       summary: c.suggestions?.summary ?? "",
       title: c.suggestions?.title || v.displayName,
-      teach: true,
     };
   };
   const setDraft = (v: SubView, patch: Partial<Draft>) => {
@@ -338,17 +343,18 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
 
   const approveOne = async (v: SubView, d: Draft, init: SendInit) => {
     const c = v.sub.contribution;
+    // Concepts go along only when the reviewer changed them; unchanged, the candidate's are published as they are
+    // (suggested ones stay suggestions). A changed classification is learned from on the server.
+    const changed = d.concepts.length !== d.classified.length || d.concepts.some((x) => !d.classified.includes(x));
     await approveContribution(
       ws,
       v.name,
       {
         etag: c.etag ?? "",
         targetCollection: c.kind === "NEW_REVISION" ? undefined : d.kb || undefined,
-        topics: d.topics,
+        ...(changed ? { concepts: d.concepts } : {}),
         summary: d.summary.trim() || undefined,
         title: titleOf(v, d),
-        // The server records a correction only when the topics differ from the assistant's.
-        recordCorrection: d.teach,
       },
       init,
     );
@@ -536,11 +542,11 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
               selecting={n > 0}
               draft={curDraft}
               setDraft={(patch) => setDraft(cur, patch)}
-              topics={topics.data ?? []}
+              taxonomy={taxonomy}
               bases={bases.data.filter((b) => b.collection?.acceptsContributions !== false || b.name === curDraft?.kb).map((b) => ({ name: b.name ?? "", displayName: b.displayName ?? "" }))}
               baseNames={baseNames}
               memberNames={memberNames}
-              canManageTopics={can("topics.update")}
+              canManageTaxonomy={can("conceptProposals.decide")}
               onStep={step}
               onBack={() => setSel("")}
               onApprove={() => approve(cur)}
@@ -581,7 +587,6 @@ export function SubmissionsQueue({ kb: initialKb, done }: { kb: string; done: Re
 function QueueItem({ view: v, active, checked, onCheck, onPick }: { view: SubView; active: boolean; checked: boolean; onCheck: (on: boolean) => void; onPick: () => void }) {
   const c = v.sub.contribution;
   const shown = v.flags.filter((f, i, all) => all.findIndex((x) => x.type === f.type) === i);
-  const proposes = (c.suggestions?.proposedTopics ?? []).length > 0;
   return (
     <div
       className={`cur-item${active ? " is-active" : ""}`}
@@ -644,11 +649,6 @@ function QueueItem({ view: v, active, checked, onCheck, onPick }: { view: SubVie
                     </span>
                   );
                 })}
-                {proposes ? (
-                  <span className="cur-flag cur-flag--accent" title="Đề xuất chủ đề mới" role="img" aria-label="Đề xuất chủ đề mới">
-                    <Tag className="i i-xs" aria-hidden />
-                  </span>
-                ) : null}
               </>
             )}
           </span>

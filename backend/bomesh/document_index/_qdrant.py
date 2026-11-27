@@ -152,23 +152,32 @@ class _QdrantBackend:
         document_item_ids: Iterable[str],
         limit: int,
         candidate_limit: int,
+        within_item_ids: Iterable[str] | None = None,
     ) -> list[Any]:
         """Search the private collection within an authorized Item scope.
 
         ``queries`` pairs each query's text with its dense embedding. Every
         query contributes a dense and a BM25 candidate list, and one native
         reciprocal-rank fusion ranks the union: a chunk several queries find
-        rises, and each point appears once.
+        rises, and each point appears once. ``within_item_ids`` (when not
+        ``None``) keeps only points of those items.
         """
 
+        query_filter = self._access_filter(
+            tenant_id=tenant_id,
+            collection_item_ids=collection_item_ids,
+            editable_collection_ids=editable_collection_ids,
+            document_item_ids=document_item_ids,
+        )
+        if within_item_ids is not None:
+            query_filter.must.append(  # type: ignore[union-attr]
+                qmodels.FieldCondition(
+                    key="item_id", match=qmodels.MatchAny(any=_ids(within_item_ids))
+                )
+            )
         return await self._search(
             queries,
-            query_filter=self._access_filter(
-                tenant_id=tenant_id,
-                collection_item_ids=collection_item_ids,
-                editable_collection_ids=editable_collection_ids,
-                document_item_ids=document_item_ids,
-            ),
+            query_filter=query_filter,
             limit=limit,
             candidate_limit=candidate_limit,
         )
@@ -201,6 +210,33 @@ class _QdrantBackend:
         points, _ = await self.scroll_points(
             scroll_filter=qmodels.Filter(must=must),
             limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        return list(points)
+
+    async def get_chunk_points(self, *, tenant_id: str, chunks: dict[str, list[int]]) -> list[Any]:
+        """Live points of the given ``chunk_index`` values, per Item, in one request.
+
+        The Items were authorized by the caller (the retriever's re-check); the
+        filter keeps tombstoned, foreign-tenant and other-schema points out.
+        """
+
+        wanted = {item_id: indexes for item_id, indexes in chunks.items() if indexes}
+        if not wanted:
+            return []
+        per_item: list[qmodels.Condition] = [
+            qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(key="item_id", match=qmodels.MatchValue(value=item_id)),
+                    qmodels.FieldCondition(key="chunk_index", match=qmodels.MatchAny(any=indexes)),
+                ]
+            )
+            for item_id, indexes in wanted.items()
+        ]
+        points, _ = await self.scroll_points(
+            scroll_filter=qmodels.Filter(must=self._live_filter(tenant_id), should=per_item),
+            limit=sum(len(indexes) for indexes in wanted.values()),
             with_payload=True,
             with_vectors=False,
         )

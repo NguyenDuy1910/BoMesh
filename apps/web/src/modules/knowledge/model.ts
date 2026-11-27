@@ -25,18 +25,28 @@ import {
 } from "lucide-react";
 
 import { fmtDate } from "@/lib/format";
-import { categoryColor } from "@/lib/tones";
 
-import type { Contribution, DocumentCover, Item, SearchItemsFacet, SearchItemsRequest, SearchItemsResult, Topic } from "./api";
+import type {
+  ConceptScheme,
+  Contribution,
+  DocumentConcept,
+  DocumentCover,
+  Item,
+  SearchItemsFacet,
+  SearchItemsInterpretation,
+  SearchItemsRequest,
+  SearchItemsResult,
+} from "./api";
 import { locationLabel, referenceOf, type Reference } from "./content/reference";
 import { DOC_TYPE_LABELS, docTypeOf, fileClassOf, itemTypeOf, type DocTypeId } from "./fileClass";
+import { acceptedConcepts, classSchemes, conceptNameOf, conceptsOf, resourceKey as lastSegment, schemeOfConcept, type Taxonomy } from "./taxonomy";
 import { readableTitle } from "./title";
 
 export { docTypeOf, fileClassOf, itemTypeOf, readableTitle, type DocTypeId };
 
 /**
  * The knowledge resource model (preview `core/catalog.js` + `core/lifecycle.js`)
- * mapped onto `/api/v1` Items: the document type (file class), topics, trust, the one
+ * mapped onto `/api/v1` Items: the document type (file class), concepts, trust, the one
  * lifecycle label people see, and Browse's URL state ↔ SearchItems request.
  * Pure functions only: components read through `toResource()`.
  */
@@ -78,55 +88,6 @@ export const docTypeOptions = (types: Iterable<DocTypeId>): [DocTypeId, string][
 
 export const LANGS: Readonly<Record<string, string>> = { en: "Tiếng Anh", vi: "Tiếng Việt" };
 export const languageName = (code: string) => LANGS[code.split("-")[0]] ?? code;
-
-/* ═══════════════ Topics (the workspace's domain → topic tree) ═══════════════ */
-
-export interface TopicNode extends Topic {
-  id: string;
-  children: (Topic & { id: string })[];
-}
-
-const lastSegment = (name: string | undefined) => (name ? name.slice(name.lastIndexOf("/") + 1) : "");
-
-/** Domains with their topics (active only), in API order. */
-export function topicTree(topics: readonly Topic[]): TopicNode[] {
-  const live = topics.filter((t) => !t.state || t.state === "ACTIVE");
-  return live
-    .filter((t) => t.kind === "DOMAIN")
-    .map((d) => ({
-      ...d,
-      id: lastSegment(d.name),
-      children: live.filter((t) => t.kind === "TOPIC" && t.parentTopic === d.name).map((t) => ({ ...t, id: lastSegment(t.name) })),
-    }));
-}
-
-/** Topic name → display name. */
-export function topicNames(topics: readonly Topic[]): Map<string, string> {
-  return new Map(topics.map((t) => [t.name ?? "", t.displayName ?? "Chủ đề chưa đặt tên"]));
-}
-
-/** How a topic is drawn (preview `topicLook`): in its domain's color, so a domain's topics read as one family — the stored
- *  color, else a stable hashed one (`categoryColor`); with its own icon, else its domain's. */
-export interface TopicLook {
-  /** Stored icon name (`Topic.icon`), the topic's own or its domain's. */
-  icon?: string;
-  /** True for a DOMAIN: it falls back to a layers icon instead of a tag. */
-  domain: boolean;
-  /** CSS color of its domain. */
-  color: string;
-}
-
-/** Topic name → how it's drawn. */
-export function topicLooks(topics: readonly Topic[]): Map<string, TopicLook> {
-  const byName = new Map(topics.map((t) => [t.name ?? "", t]));
-  return new Map(
-    topics.map((t) => {
-      const dm = t.kind === "TOPIC" && t.parentTopic ? byName.get(t.parentTopic) : t;
-      const look: TopicLook = { icon: t.icon || dm?.icon || undefined, domain: t.kind === "DOMAIN", color: dm?.color || categoryColor(lastSegment(dm?.name ?? t.name)) };
-      return [t.name ?? "", look];
-    }),
-  );
-}
 
 /* ═══════════════ Trust (verification + freshness) ═══════════════ */
 
@@ -253,10 +214,8 @@ export interface ModelContext {
   workspaceId: string;
   /** The caller's PERSONAL collection name ("My files"). */
   personalCollection?: string;
-  /** Topic name → display name. */
-  topicNames?: ReadonlyMap<string, string>;
-  /** Topic name → color and icon. */
-  topicLooks?: ReadonlyMap<string, TopicLook>;
+  /** The workspace taxonomy (concept names, paths and looks). */
+  taxonomy?: Taxonomy;
   /** Collection name → display name (root collections, `ancestors` facet values, item ancestors). */
   collectionNames?: ReadonlyMap<string, string>;
 }
@@ -285,8 +244,10 @@ export interface Resource {
   /** The file class (`itemType`). */
   type: DocTypeId;
   typeMeta: DocTypeMeta;
-  /** Topic names (resource names). */
-  topics: string[];
+  /** The document's assignments (`document.concepts`: ACCEPTED and SUGGESTED; reads omit REJECTED). */
+  assignments: DocumentConcept[];
+  /** Concepts it is filed under (ACCEPTED assignments' concept names). */
+  concepts: string[];
   /** The collection (root collection) or the parent collection when the root isn't known. `personal`: a member's own
    *  files, named by the UI (“My files”, “Lan’s files”), so the name is translated, unlike collection names. */
   base: { name: string; id: string; displayName: string; personal: boolean } | null;
@@ -344,7 +305,8 @@ export function toResource(item: Item, ctx: ModelContext, extra: { contribution?
     mime: doc?.mimeType ?? "",
     type,
     typeMeta: DOC_TYPES[type],
-    topics: doc?.topics ?? [],
+    assignments: doc?.concepts ?? [],
+    concepts: acceptedConcepts(doc?.concepts),
     base: base && isPersonal ? { ...base, displayName: base.displayName || "Tệp của tôi" } : base,
     isPersonal,
     owner: doc?.owner,
@@ -380,23 +342,29 @@ export function indexStatusOf(r: Resource): "pending" | "processing" | "failed" 
 
 /* ═══════════════ Browse: facets, URL state ↔ SearchItems ═══════════════ */
 
-export type FacetId = "topic" | "type" | "owner" | "src" | "kb" | "trust" | "upd";
+/** A static Browse dimension; every classification scheme adds one more, keyed by the scheme's ID. */
+export type StaticFacetId = "type" | "owner" | "src" | "kb" | "trust" | "upd";
+/** A Browse facet: a classification scheme's ID or a {@link StaticFacetId}. */
+export type FacetId = string;
 
-/** A Browse dimension SearchItems serves; its name is the catalog's (`m.knowledge.browse.facets[id]`). */
+/**
+ * A Browse dimension SearchItems serves. A static one is named by the catalog (`m.knowledge.browse.facets[id]`); a
+ * classification scheme's by the scheme (content, never translated).
+ */
 export interface FacetDef {
   id: FacetId;
   /** SearchItems facet field (`updateTime` is an interval facet over UPDATED_WINDOWS). */
   field: string;
   single?: boolean;
+  /** A classification scheme's facet: the scheme's full name (`document.concepts` with `prefixes: [scheme]`). */
+  scheme?: string;
 }
 
 /**
- * Browse dimensions backed by SearchItems. Missing vs the preview: Space (no item ↔ space
- * facet; space materials aren't searchable) and Language (`document.languageCode` is a facet
- * but not a filter field). See the knowledge-core report.
+ * Browse dimensions besides the classification schemes, backed by SearchItems. Missing vs the preview: Space and
+ * Language are Browse's own (`browse/catalog.ts`).
  */
 export const FACETS: readonly FacetDef[] = [
-  { id: "topic", field: "document.topics" },
   { id: "type", field: "itemType" },
   { id: "owner", field: "document.owner" },
   { id: "src", field: "document.origin.source" },
@@ -404,6 +372,19 @@ export const FACETS: readonly FacetDef[] = [
   { id: "trust", field: "document.verification.state" },
   { id: "upd", field: "updateTime", single: true },
 ];
+const STATIC_FACETS: ReadonlySet<string> = new Set(FACETS.map((f) => f.id));
+
+/** A classification scheme's facet id (anything the static dimensions don't name). */
+export const isSchemeFacet = (id: FacetId) => !STATIC_FACETS.has(id);
+
+/** A classification scheme as a Browse facet (preview `schemeFacet`): a document counts under every broader concept. */
+export const schemeFacet = (s: ConceptScheme): FacetDef => ({ id: lastSegment(s.name), field: "document.concepts", scheme: s.name ?? "" });
+
+/** Every Browse dimension (preview `facetsOn`): one per classification scheme in tab order, then the static ones. */
+export const catalogFacets = (t: Taxonomy): FacetDef[] => [...classSchemes(t).map(schemeFacet), ...FACETS];
+
+/** Facet ids in URL order: the scheme facets present (in their order), then the static ones. */
+const filterOrder = (filters: Partial<Record<FacetId, string[]>> | undefined) => [...Object.keys(filters ?? {}).filter(isSchemeFacet), ...FACETS.map((f) => f.id)];
 
 /** The Updated facet's windows: [key, days]; each is named in the catalog (`m.knowledge.browse.updated[key]`). */
 export type UpdatedWindow = "7d" | "30d" | "365d";
@@ -421,7 +402,7 @@ export interface CatalogParams {
   /** "" = default (relevance with a query, else updated). */
   sort: CatalogSort | "";
   view: "grid" | "list";
-  /** Facet id → selected values (bare IDs for topics, bases, owners, sources; keys otherwise). */
+  /** Facet id → selected values (bare IDs for concepts, bases, owners, sources; keys otherwise). */
   filters: Partial<Record<FacetId, string[]>>;
   /** "Only documents I saved". */
   saved?: boolean;
@@ -430,8 +411,9 @@ export interface CatalogParams {
 type QueryLike = URLSearchParams | Readonly<Record<string, string | undefined>>;
 const read = (q: QueryLike, key: string) => (q instanceof URLSearchParams ? q.get(key) : q[key]) ?? "";
 
-/** URL query → catalog params. Multi-value facets are comma lists (preview `parseCatalogQuery`). */
-export function parseCatalogQuery(query: QueryLike): CatalogParams {
+/** URL query → catalog params (preview `parseCatalogQuery`). Multi-value facets are comma lists; `facets` names the
+ *  dimensions to read (default the static ones; Browse passes {@link catalogFacets}). */
+export function parseCatalogQuery(query: QueryLike, facets: readonly FacetDef[] = FACETS): CatalogParams {
   const sort = read(query, "sort");
   const p: CatalogParams = {
     q: read(query, "q").trim(),
@@ -439,7 +421,7 @@ export function parseCatalogQuery(query: QueryLike): CatalogParams {
     view: read(query, "view") === "list" ? "list" : "grid",
     filters: {},
   };
-  for (const f of FACETS) {
+  for (const f of facets) {
     const values = read(query, f.id).split(",").filter(Boolean);
     if (values.length) p.filters[f.id] = f.single ? [values[0]] : values;
   }
@@ -454,18 +436,21 @@ export function catalogQueryOf(p: Partial<CatalogParams>): Record<string, string
   if (p.sort) out.sort = p.sort;
   if (p.view === "list") out.view = "list";
   if (p.saved) out.saved = "1";
-  for (const f of FACETS) {
-    const v = p.filters?.[f.id];
-    if (v?.length) out[f.id] = v.join(",");
+  for (const id of filterOrder(p.filters)) {
+    const v = p.filters?.[id];
+    if (v?.length) out[id] = v.join(",");
   }
   return out;
 }
 
-/** `/knowledge?…` (Browse) for a params patch, e.g. `catalogHref({ filters: { topic: [topicId] } })`. */
+/** `/knowledge?…` (Browse) for a params patch, e.g. `catalogHref({ filters: { [schemeId]: [conceptId] } })`. */
 export function catalogHref(p: Partial<CatalogParams> = {}): string {
   const qs = new URLSearchParams(catalogQueryOf(p)).toString();
   return "/knowledge" + (qs ? `?${qs}` : "");
 }
+
+/** Browse filtered to one concept (preview `conceptHref`): its scheme's facet, narrower concepts included. */
+export const conceptHref = (concept: string) => catalogHref({ filters: { [lastSegment(schemeOfConcept(concept))]: [lastSegment(concept)] } });
 
 export const activeFilterCount = (p: CatalogParams) =>
   Object.values(p.filters).reduce((n, v) => n + (v?.length ?? 0), 0) + (p.saved ? 1 : 0);
@@ -479,10 +464,9 @@ const lit = (v: string) => `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 /** The AIP-160 clause for one facet's selected values (OR within a facet). */
 function facetClause(id: FacetId, values: readonly string[], ws: string): string {
   const any = (parts: string[]) => (parts.length > 1 ? `(${parts.join(" OR ")})` : parts[0] ?? "");
-  switch (id) {
-    case "topic":
-      // Hierarchical on the server: a domain also matches everything under it.
-      return any(values.map((v) => `document.topics:${lit(`workspaces/${ws}/topics/${v}`)}`));
+  // Hierarchical on the server: a concept also matches everything under it.
+  if (isSchemeFacet(id)) return any(values.map((v) => `document.concepts:${lit(conceptNameOf(`workspaces/${ws}/conceptSchemes/${id}`, v))}`));
+  switch (id as StaticFacetId) {
     case "type":
       return any(values.map((v) => `itemType = ${itemTypeOf(docTypeOf(v))}`));
     case "owner":
@@ -497,12 +481,14 @@ function facetClause(id: FacetId, values: readonly string[], ws: string): string
       const days = UPDATED_WINDOWS.find((w) => w[0] === values[0])?.[1];
       return days ? `updateTime >= ${lit(new Date(Date.now() - days * 86_400_000).toISOString())}` : "";
     }
+    default:
+      return "";
   }
 }
 
-/** AIP-160 filter for the selected facets (AND across facets); `base` adds extra clauses (e.g. a subtree). */
+/** AIP-160 filter for the selected facets (OR within a scheme or facet, AND across them); `base` adds extra clauses (e.g. a subtree). */
 export function catalogFilter(p: CatalogParams, ws: string, { base }: { base?: string } = {}): string {
-  const clauses = FACETS.map((f) => (p.filters[f.id]?.length ? facetClause(f.id, p.filters[f.id]!, ws) : "")).filter(Boolean);
+  const clauses = filterOrder(p.filters).map((id) => (p.filters[id]?.length ? facetClause(id, p.filters[id]!, ws) : "")).filter(Boolean);
   if (base) clauses.unshift(base);
   return clauses.join(" AND ");
 }
@@ -510,28 +496,32 @@ export function catalogFilter(p: CatalogParams, ws: string, { base }: { base?: s
 export const ORDER_BY: Readonly<Record<CatalogSort, string>> = { relevance: "", updated: "updateTime desc", title: "displayName" };
 
 /**
- * SearchItems request for Browse (facets disjunctive, snippets + a content reference for previews). Updated is an
- * interval facet: one `updateTime` interval per window, in UPDATED_WINDOWS order.
+ * SearchItems request for Browse (facets disjunctive, snippets + a content reference for previews). `facets`: the
+ * dimensions to count (default the static ones; `false` = none). A scheme facet is `document.concepts` with `prefixes`
+ * (one per scheme); Updated is an interval facet: one `updateTime` interval per window, in UPDATED_WINDOWS order.
  */
 export function catalogSearchRequest(
   p: CatalogParams,
   ws: string,
-  options: { base?: string; pageSize?: number; pageToken?: string; facets?: boolean } = {},
+  options: { base?: string; pageSize?: number; pageToken?: string; facets?: readonly FacetDef[] | false } = {},
 ): SearchItemsRequest {
   const sort = p.sort || (p.q ? "relevance" : "updated");
   // Window starts are floored to the hour so requests built within the hour stay equal (cache keys).
   const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+  const facets = options.facets ?? FACETS;
   return {
     query: p.q || undefined,
     filter: catalogFilter(p, ws, options) || undefined,
     orderBy: ORDER_BY[sort] || undefined,
     facetSpecs:
-      options.facets === false
+      facets === false
         ? undefined
-        : FACETS.map((f) =>
+        : facets.map((f) =>
             f.id === "upd"
               ? { field: f.field, intervals: UPDATED_WINDOWS.map(([, days]) => ({ minimum: new Date(hour - days * 86_400_000).toISOString() })), excludedFromFilter: true }
-              : { field: f.field, limit: f.id === "topic" ? 100 : 30, excludedFromFilter: true },
+              : f.scheme
+                ? { field: f.field, prefixes: [f.scheme], limit: 100, excludedFromFilter: true }
+                : { field: f.field, limit: 30, excludedFromFilter: true },
           ),
     contentSearchSpec: p.q ? { snippets: true, references: 1 } : undefined,
     pageSize: options.pageSize ?? 30,
@@ -547,28 +537,37 @@ export interface FacetOption {
 }
 
 /**
- * API facets → `{ facetId: options }` with bare-ID values, preview labels and selected
- * values kept (count 0) so people can always deselect them. Verification and Updated values
- * are labelled with their keys: Browse names them from the catalog (`browse/labels.ts`).
+ * API facets → `{ facetId: options }` with bare-ID values, preview labels and selected values kept (count 0) so people
+ * can always deselect them. A scheme facet takes its scheme's concepts from the `document.concepts` facets (values are
+ * concept names; each is counted once), in the scheme's concept order when `labels.taxonomy` is given. Verification
+ * and Updated values are labelled with their keys: Browse names them from the catalog (`browse/labels.ts`).
  */
 export function facetOptions(
   facets: readonly SearchItemsFacet[] | undefined,
   p: CatalogParams,
-  labels: { owner?: (name: string) => string; source?: (name: string) => string } = {},
+  labels: { owner?: (name: string) => string; source?: (name: string) => string; taxonomy?: Taxonomy } = {},
+  defs: readonly FacetDef[] = FACETS,
 ): Partial<Record<FacetId, FacetOption[]>> {
   const out: Partial<Record<FacetId, FacetOption[]>> = {};
-  for (const def of FACETS) {
+  for (const def of defs) {
     const counts = new Map<string, { label: string; count: number }>();
     const add = (value: string, label: string, count: number) => {
       const prev = counts.get(value);
       counts.set(value, { label: prev?.label || label, count: (prev?.count ?? 0) + count });
     };
-    const api = facets?.find((f) => f.field === def.field);
+    if (def.scheme) {
+      for (const f of facets ?? [])
+        if (f.field === def.field)
+          for (const v of f.values ?? []) {
+            const key = lastSegment(v.value);
+            if (v.value && schemeOfConcept(v.value) === def.scheme && !counts.has(key)) add(key, v.displayName || "Khái niệm chưa đặt tên", v.documentCount ?? 0);
+          }
+    }
+    const api = def.scheme ? undefined : facets?.find((f) => f.field === def.field);
     for (const [i, v] of (api?.values ?? []).entries()) {
       const raw = v.value ?? "";
       const n = v.documentCount ?? 0;
-      switch (def.id) {
-        case "topic":
+      switch (def.id as StaticFacetId) {
         case "kb":
           add(lastSegment(raw), v.displayName || "Chưa đặt tên", n);
           break;
@@ -595,10 +594,86 @@ export function facetOptions(
     if (def.id === "upd") for (const [key] of UPDATED_WINDOWS) add(key, key, 0);
     for (const v of p.filters[def.id] ?? []) if (!counts.has(v)) add(v, v, 0);
     const opts = [...counts].map(([value, x]) => ({ value, label: x.label, count: x.count, on: !!p.filters[def.id]?.includes(value) }));
-    if (def.id !== "upd") opts.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    if (def.scheme && labels.taxonomy) {
+      const order = conceptsOf(labels.taxonomy, def.scheme).map((c) => lastSegment(c.name));
+      const at = (v: string) => (order.includes(v) ? order.indexOf(v) : order.length);
+      opts.sort((a, b) => at(a.value) - at(b.value) || b.count - a.count);
+    } else if (def.id !== "upd") opts.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
     out[def.id] = opts;
   }
   return out;
+}
+
+/** A document's accepted concepts in reading order (preview `conceptOrder`): the first classification scheme's (its
+ *  primary first), then the other schemes' in their tab order. Concepts the taxonomy no longer has are left out. */
+export function conceptOrder(t: Taxonomy, assignments: readonly DocumentConcept[]): string[] {
+  const pos = new Map(classSchemes(t).map((s, i) => [s.name, i]));
+  const at = (c: string) => pos.get(schemeOfConcept(c)) ?? pos.size;
+  return assignments
+    .filter((a) => a.state !== "SUGGESTED" && a.concept && t.byName.has(a.concept))
+    .map((a, i) => ({ c: a.concept!, primary: a.primary ? 0 : 1, i }))
+    .sort((a, b) => at(a.c) - at(b.c) || a.primary - b.primary || a.i - b.i)
+    .map((x) => x.c);
+}
+
+/* ═══════════════ Search: the concepts a query names (SearchItems.interpretation; `conversation_loop.md` "Knowledge retrieval"; `api_design.md` SearchItems) ═══════════════ */
+
+/** One understood reading: the query words it came from and its concepts in one scheme (an expansion group is one). */
+export interface UnderstoodTerm {
+  key: string;
+  text: string;
+  /** Scheme name. */
+  scheme: string;
+  /** Concept names. */
+  concepts: string[];
+}
+
+/** What the search understood, one term per query words and scheme (preview `understand` chips). */
+export function understoodTerms(interpretation: SearchItemsInterpretation | undefined): UnderstoodTerm[] {
+  const out: UnderstoodTerm[] = [];
+  for (const c of interpretation?.concepts ?? []) {
+    if (!c.concept) continue;
+    const text = c.text ?? "";
+    const scheme = schemeOfConcept(c.concept);
+    const key = `${text}|${scheme}`;
+    let term = out.find((x) => x.key === key);
+    if (!term) out.push((term = { key, text, scheme, concepts: [] }));
+    if (!term.concepts.includes(c.concept)) term.concepts.push(c.concept);
+  }
+  return out;
+}
+
+export type QueryAmbiguity = NonNullable<SearchItemsInterpretation["ambiguities"]>[number];
+export type AmbiguityOption = NonNullable<QueryAmbiguity["options"]>[number];
+
+/** A meaning is picked when its scheme's facet selects every one of its concepts. */
+export function optionPicked(option: AmbiguityOption, p: CatalogParams): boolean {
+  const on = p.filters[lastSegment(option.scheme)] ?? [];
+  return !!option.concepts?.length && option.concepts.every((c) => on.includes(lastSegment(c)));
+}
+
+/** Picking a meaning: its concepts join its scheme's filter (the clause the option's own `filter` names). */
+export function pickOption<P extends CatalogParams>(p: P, option: AmbiguityOption): P {
+  const id = lastSegment(option.scheme);
+  return { ...p, filters: { ...p.filters, [id]: [...new Set([...(p.filters[id] ?? []), ...(option.concepts ?? []).map(lastSegment)])] } };
+}
+
+/** Back to the choice: the meaning's concepts leave its scheme's filter. */
+export function unpickOption<P extends CatalogParams>(p: P, option: AmbiguityOption): P {
+  const id = lastSegment(option.scheme);
+  const drop = new Set((option.concepts ?? []).map(lastSegment));
+  return { ...p, filters: { ...p.filters, [id]: (p.filters[id] ?? []).filter((v) => !drop.has(v)) } };
+}
+
+/**
+ * The query without the words a reading came from (accent- and case-insensitive), so the search no longer names it.
+ * SearchItems has no way to set a reading aside, so × on an understood concept searches without its words.
+ */
+export function queryWithout(q: string, text: string): string {
+  const needle = fold(text.trim());
+  const at = needle ? fold(q).indexOf(needle) : -1;
+  if (at < 0) return q;
+  return `${q.slice(0, at)} ${q.slice(at + needle.length)}`.replace(/\s+/g, " ").trim();
 }
 
 /** Highlighted snippet (the API marks matches with `<b>…</b>` or `<mark>`); `null` when none. */

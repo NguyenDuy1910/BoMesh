@@ -41,7 +41,7 @@ route('/projects', { page: 'projects', mode: 'workspace', nav: 'projects', title
 route('/project/:id', { page: 'project', mode: 'workspace', nav: 'projects', title: 'Project' });
 route('/contributions', { page: 'contributions', mode: 'workspace', nav: 'contributions', title: 'My contributions', simLoad: true });
 route('/search', { page: 'search', mode: 'workspace', nav: 'search', title: 'Search' });
-// Knowledge: Browse (the organization's knowledge: search, topics, filters) → Reader; the Map draws the same knowledge as a tree; My library is personal.
+// Knowledge: Browse (the organization's knowledge: search, concepts by scheme, filters) → Reader; the Map draws the same knowledge as a tree; My library is personal.
 route('/knowledge', { page: 'catalog', mode: 'workspace', nav: 'knowledge', title: 'Knowledge', simLoad: true });
 route('/knowledge/map', { page: 'atlas', mode: 'workspace', nav: 'knowledge', title: 'Knowledge map', simLoad: true });
 route('/knowledge/library', { page: 'library', mode: 'workspace', nav: 'knowledge', title: 'My library', simLoad: true });
@@ -50,8 +50,8 @@ route('/doc/:id', { page: 'docViewer', mode: 'workspace', nav: 'knowledge', titl
 route('/overview', { page: 'overview', mode: 'workspace', nav: 'overview', title: 'Overview', perm: 'tenant.manage', simLoad: true });
 // Knowledge Studio: the one place knowledge is run, its sections listed under it in the sidebar —
 //   Documents (every document: All · Processing · Review; publication and processing are separate states, nothing is
-//   processed until someone chooses, and a submission is processed before it's reviewed) · Collections (where documents live, who reads them) · Topics (what
-//   documents are about: the topics and their suggestions) · Sources (what comes in, with the accounts it signs in with).
+//   processed until someone chooses, and a submission is processed before it's reviewed) · Collections (where documents live, who reads them) · Classification (how
+//   documents are filed: a tab per scheme, the suggestions awaiting people) · Sources (what comes in, with the accounts it signs in with).
 // Each section shows only to the people who can use it; the page itself is open to anyone with one (P.studio decides).
 route('/studio', { page: 'studio', mode: 'workspace', nav: 'studio', title: 'Knowledge Studio', simLoad: true });
 // One collection: access, the sources that feed it, settings (its owners and editors).
@@ -79,7 +79,7 @@ const REDIRECTS = [
   [/^\/knowledge\/library$/, (m, q) => (q.tab === 'contributions' ? `/contributions?${q.open ? 'open=' + encodeURIComponent(q.open) : ''}` : q.tab === 'recent' ? '/chat' : null)],
   [/^\/(documents|knowledge-health)$/, () => '/studio'],
   // Old Studio sections (Review, Taxonomy, Library, Master data, Quality, Knowledge flow) and Documents views (Issues →
-  // Processing; Quality → All with ?quality=) land in Documents or Topics: P.studio (features/curation.js legacyOf) renders
+  // Processing; Quality → All with ?quality=) land in Documents or Classification: P.studio (features/curation.js legacyOf) renders
   // and rewrites ?tab=, ?view=, ?part=, ?mode=, ?queue=, ?life= and ?seg=.
   // Sources and Connections were pages of their own; now they are Knowledge Studio → Sources (accounts are one of its views).
   [/^\/sources$/, (m, q) => `/studio?${new URLSearchParams({ ...q, tab: 'sources', ...(q.tab === 'history' ? { view: 'history' } : {}) })}`],

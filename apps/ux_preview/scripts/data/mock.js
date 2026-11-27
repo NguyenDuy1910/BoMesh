@@ -7,7 +7,7 @@
 
 /* ═══════════════════════════ Data scopes ═══════════════════════════ */
 const WS_DATA_KEYS = new Set(['roles', 'groups', 'members', 'knownAccounts', 'kbs', 'folders', 'docs', 'accounts', 'sources', 'runs', 'requests', 'audit', 'signins', 'usage', 'convs', 'assistant', 'gaps', 'artifacts',
-  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'topics', 'masterImports', 'reviewBatches', 'classGroups', 'classCorrections', 'views', 'saved', 'recent', 'dupDismissed', 'topicProposals', 'projects', 'resourceShares',
+  'spaces', 'events', 'works', 'requestTypes', 'svcRequests', 'schemes', 'concepts', 'conceptGroups', 'conceptRules', 'conceptProposals', 'assignmentBatches', 'reviewCorrections', 'masterImports', 'reviewBatches', 'views', 'saved', 'recent', 'dupDismissed', 'projects', 'resourceShares',
   'gettingStarted']);
 const DB = { global: {}, ws: {} };
 let DATA_SEEDING = null;            // workspace being seeded by a data file

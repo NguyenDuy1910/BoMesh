@@ -46,6 +46,7 @@ from api.dto.knowledge_items import (
     collection_import_response,
     collection_import_rows,
     content_message,
+    facet_schemes,
     item_changes,
     item_filters,
     item_message,
@@ -98,7 +99,9 @@ _ITEM_FIELDS = MutableFields(
         "collection.discoverable",
         "collection.acceptsContributions",
         "collection.inheritAccess",
-        "document.topics",
+        "document.concepts",
+        "document.issuance",
+        "document.applicability",
         "document.summary",
         "document.languageCode",
         "document.owner",
@@ -503,10 +506,12 @@ async def search_items(
                     limit=spec.limit or 0,
                     intervals=_facet_intervals(spec),
                     matches_request=facet_node == node,
+                    prefixes=schemes,
                 )
                 for spec in facet_specs
+                for schemes in (facet_schemes(spec, workspace),)
                 for facet_node in (
-                    without_field(node, FACET_FILTER_FIELDS[spec.field])
+                    without_field(node, FACET_FILTER_FIELDS[spec.field], frozenset(schemes))
                     if spec.excluded_from_filter
                     else node,
                 )

@@ -1,0 +1,9 @@
+notation,broader,prefVi,prefEn,altVi,altEn,hidden,definition,scopeNote,examples,color,icon,matchPatterns,timeSensitive,mappings,related
+thi-sinh,,Thí sinh,Applicants,thí sinh dự tuyển|học sinh THPT|người dự tuyển,prospective students,,Người dự tuyển vào các bậc đào tạo của trường và phụ huynh của họ.,,,,,,false,,
+sinh-vien,,Sinh viên đại học,Undergraduate students,sinh viên|SV|tân sinh viên|SV ĐH,students,,Người học trình độ đại học chính quy của trường.,"Không bao gồm người học vừa làm vừa học, liên thông (→ Người học VLVH/liên thông) và học viên sau đại học (→ Học viên/NCS sau đại học).",,,,,false,,
+hoc-vien-sau-dai-hoc,,Học viên/NCS sau đại học,Graduate students,học viên cao học|nghiên cứu sinh|NCS|học viên sau đại học,master's students|doctoral candidates,,Học viên cao học và nghiên cứu sinh của trường.,,,,,,false,,
+nguoi-hoc-khong-chinh-quy,,Người học VLVH/liên thông,Part-time & bridging learners,người học vừa làm vừa học|sinh viên liên thông|sinh viên văn bằng 2,part-time students,,"Người học hình thức vừa làm vừa học, liên thông, văn bằng 2, từ xa và học viên bồi dưỡng ngắn hạn.",,,,,,false,,
+giang-vien,,Giảng viên,Lecturers,GV|cán bộ giảng dạy|nhà nghiên cứu|nghiên cứu viên,faculty|researchers,,"Giảng viên, nghiên cứu viên và cán bộ giảng dạy của trường.",,,,,,false,,
+can-bo-vien-chuc,,Cán bộ – viên chức,Staff,viên chức|CBVC|người lao động|cán bộ|nhân viên,employees,,"Cán bộ quản lý, viên chức và người lao động của trường.",,,,,,false,,
+doanh-nghiep-doi-tac,,Doanh nghiệp & đối tác,Employers & partners,doanh nghiệp|nhà tuyển dụng|đối tác,employers|partners,,"Doanh nghiệp, nhà tuyển dụng và tổ chức đối tác của trường.",,,,,,false,,
+cong-chung,,Công chúng,General public,cộng đồng|người dân|báo chí,public,,"Người đọc bên ngoài trường: cộng đồng, báo chí và người quan tâm.",,,,,,false,,

@@ -56,7 +56,7 @@
 .au-rules li.is-ok { color: var(--success-soft-foreground); }
 .au-terms { display: flex; flex-direction: column; gap: 6px; }
 
-/* Brand panel: a quiet illustration of layered documents joined into a network of people, topics and collections; no copy.
+/* Brand panel: a quiet illustration of layered documents joined into a network of people, concepts and collections; no copy.
    Lavender ground from the violet tone, with blue, peach and amber accents; every colour mixes the fixed category tones
    with the theme's surface, so the panel follows light and dark. Decorative only (aria-hidden), hidden under 1024 px. */
 .au-aside {
@@ -106,7 +106,7 @@
 .au-art__halo--peach { stroke: color-mix(in oklab, var(--art-peach) 60%, transparent); }
 .au-art__spark { fill: var(--art-amber); }
 .au-art__ring { fill: none; stroke: var(--art-blue); stroke-width: 1.5; }
-/* Node glyphs (people, topic, collection): white strokes on the coloured nodes, in both themes. */
+/* Node glyphs (people, concept, collection): white strokes on the coloured nodes, in both themes. */
 .au-art__icon { fill: none; stroke: var(--snow); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 /* Motion: links drift along, halos breathe, the outer sheets float a few pixels. Nothing moves with reduced motion. */
 @keyframes au-flow { to { stroke-dashoffset: -90; } }

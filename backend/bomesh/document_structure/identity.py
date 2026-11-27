@@ -238,10 +238,11 @@ class CitationTarget(_Frozen):
             return None
 
     @property
-    def key(self) -> tuple[UUID, int, str, tuple[str, ...]]:
-        """Identity for deduplication: the same nodes of the same document version."""
+    def key(self) -> tuple[UUID, int, str, tuple[str, ...], tuple[Highlight, ...]]:
+        """Identity for deduplication: the same nodes of the same document version, marked in the same
+        regions. Nodes alone do not tell targets apart: every row of a table is cut from one table node."""
 
-        return (self.item_id, self.revision_number, self.structure_version, self.refs)
+        return (self.item_id, self.revision_number, self.structure_version, self.refs, self.highlights)
 
 
 def clip(text: str, limit: int) -> str:

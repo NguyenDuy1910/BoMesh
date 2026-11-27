@@ -396,7 +396,7 @@ async def test_a_custom_role_on_a_collection_confers_only_collection_permissions
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
     curator_role = await world.make_role(
-        workspace, "curator", ["items.get", "items.update", "members.list", "topics.create"]
+        workspace, "curator", ["items.get", "items.update", "members.list", "concepts.create"]
     )
     curator = await world.add_member(workspace, role=None)
     collection = await world.make_collection(workspace)
@@ -413,11 +413,11 @@ async def test_a_custom_role_on_a_collection_confers_only_collection_permissions
     authorizer = world.authorizer()
     held = await authorizer.collection_permissions(principal(curator), document.id)
     assert {"items.get", "items.update"} <= held
-    assert not {"members.list", "topics.create"} & held
+    assert not {"members.list", "concepts.create"} & held
     assert await authorizer.workspace_permissions(principal(curator), workspace.id) == frozenset()
     # The same role on the workspace confers its workspace permissions too.
     await world.grant(curator, curator_role, on=workspace)
-    assert {"members.list", "topics.create"} <= await world.authorizer().workspace_permissions(
+    assert {"members.list", "concepts.create"} <= await world.authorizer().workspace_permissions(
         principal(curator), workspace.id
     )
 

@@ -24,7 +24,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload
 
-from bomesh.connector.processing import ChunkStrategy, DoclingChunker, DoclingChunkingError
+from bomesh.connector.processing import (
+    ChunkStrategy,
+    DoclingChunker,
+    DoclingChunkingError,
+)
 from bomesh.connector.processing.highlights import (
     AlignedLocator,
     Locator,
@@ -45,14 +49,13 @@ from bomesh.db.engine import advisory_lock_scope, transaction_scope
 from bomesh.db.models import (
     Contribution,
     ExternalResource,
-    IngestionSource,
     Item,
     ItemIndexState,
     ItemRevision,
+    Tenant,
 )
 from bomesh.document_index import (
     ClassificationCache,
-    ClassificationRequest,
     DocumentClassification,
     EmbeddingRejectedError,
     IndexingContext,
@@ -60,6 +63,7 @@ from bomesh.document_index import (
     ItemIndex,
     ItemPayloadState,
 )
+from bomesh.document_structure import StructureManifest, StructureRef
 from bomesh.iam.authorizer import item_ancestry
 from bomesh.services import (
     DocumentNotFoundError,
@@ -71,21 +75,32 @@ from bomesh.services.knowledge_curation.access import (
     deciding_collection,
     open_new_document_contributions,
 )
-from bomesh.services.knowledge_curation.topic_assignments import (
-    replace_classified_suggestions,
-)
-from bomesh.services.knowledge_curation.topics import classification_candidates
 from bomesh.services.knowledge_items.classification_answers import StoredClassifications
-from bomesh.services.knowledge_items.documents import apply_assistant_topics
 from bomesh.services.knowledge_items.item_store import ItemService
 from bomesh.services.knowledge_items.original_parser import (
     OriginalParser,
     parsed_as_pdf,
     parsed_file_name,
 )
-from bomesh.services.knowledge_items.structure_store import StructureStore
+from bomesh.services.knowledge_items.structure_store import (
+    ParsedStructure,
+    StructureStore,
+    StructureUnavailable,
+)
 from bomesh.services.previews.engine import revision_file_name
 from bomesh.services.previews.formats import Producer, classify
+from bomesh.services.taxonomy.assignments import replace_machine_assignments
+from bomesh.services.taxonomy.classification import (
+    ClassificationOptions,
+    ClassificationPlan,
+    PreparedDocument,
+    Signals,
+    decide,
+    document_input,
+    load_plan,
+    prepare,
+)
+from bomesh.services.taxonomy.profiles import write_extracted_profile
 
 if TYPE_CHECKING:
     from bomesh.services.ingestion.run_engine import RunClassification
@@ -185,10 +200,13 @@ class ItemIngestionService:
         pdfs: OriginalParser | None = None,
         chunker: DoclingChunker | None = None,
         classifications: StoredClassifications | None = None,
+        signals: Signals | None = None,
     ) -> None:
         """``pdfs`` reads the PDF a document's Original preview shows, where its
         citations' boxes are found; without it, only sheet ranges and the boxes
-        Docling recorded are located."""
+        Docling recorded are located. ``signals`` adds the concept-card and kNN
+        candidate signals to CLASSIFYING; without it, candidates come from
+        lexical matches, rules and priors only."""
         self._session_factory = session_factory
         self._index = index
         self._structures = structures
@@ -196,32 +214,42 @@ class ItemIngestionService:
         self._chunker = chunker or DoclingChunker()
         #: Where classification answers are kept for reuse; ``None`` asks every time.
         self._classifications = classifications
+        self._signals = signals
 
     def processing_version(self) -> str:
         """The version processing produces now; it marks what a run made ready."""
 
         return current_processing_version(self._index.current_processing_signature())
 
-    async def classification_request(
+    async def classification_plan(
         self, tenant_id: UUID, classification: RunClassification | None
-    ) -> ClassificationRequest | None:
-        """A run's CLASSIFYING candidates, loaded once for all its Documents.
+    ) -> ClassificationPlan | None:
+        """A run's CLASSIFYING plan, built once for all its Documents.
 
-        The run's topics, a DOMAIN standing for itself and its ACTIVE topics;
-        none = every ACTIVE topic of the workspace; each with its signals and
-        rules. ``None`` without candidates.
+        The tenant's published classification schemes in the run's scope, its
+        rules and the shared prompt prefix; ``None`` when no published
+        classification scheme is in scope (nothing is classified).
         """
 
-        async with transaction_scope(self._session_factory) as session:
-            candidates = await classification_candidates(
-                session, tenant_id, classification.topics if classification is not None else ()
+        options = (
+            ClassificationOptions(
+                concepts=tuple(UUID(value) for value in classification.concepts),
+                note=classification.note,
+                rerank={
+                    code: tuple(UUID(value) for value in ids)
+                    for code, ids in classification.rerank.items()
+                },
+                schemes=tuple(classification.schemes),
+                suggest_only=classification.suggest_only,
             )
-        if not candidates:
-            return None
-        return ClassificationRequest(
-            candidates=candidates,
-            note=classification.note if classification is not None else None,
+            if classification is not None
+            else None
         )
+        async with transaction_scope(self._session_factory) as session:
+            workspace_code = await session.scalar(select(Tenant.code).where(Tenant.id == tenant_id))
+            if workspace_code is None:
+                return None
+            return await load_plan(session, tenant_id, options, workspace_code=workspace_code)
 
     async def process_document(
         self,
@@ -229,7 +257,7 @@ class ItemIngestionService:
         *,
         tenant_id: UUID,
         progress: IndexProgress | None = None,
-        classification: ClassificationRequest | None = None,
+        plan: ClassificationPlan | None = None,
         read_images: bool = False,
     ) -> int:
         """Chunk, classify, contextualize, embed and index one Document's current revision.
@@ -240,14 +268,14 @@ class ItemIngestionService:
 
         Uploads and connector Items alike. Authorization happened when the run
         was created; this only requires the Document to belong to the tenant
-        and its original to be stored. ``classification`` is the run's
-        :meth:`classification_request`; a candidate whose rule matches the
-        Document (an ancestor collection, its source) settles its topics. The
-        candidate of an open NEW_DOCUMENT contribution matches collection rules
-        where it is headed (target, else suggested collection) and its
-        classification replaces the contribution's suggested topics and summary.
-        ``read_images`` is the run's ``readImages``: the vision model reads the
-        text inside the Document's pictures.
+        and its original to be stored. ``plan`` is the run's
+        :meth:`classification_plan`: the Document is prepared against it after
+        chunking (rules match its collections and source; the candidate of an
+        open NEW_DOCUMENT contribution matches where it is headed), the model
+        answers inside indexing, and the labels, outcomes and profile are
+        written with the index state. ``read_images`` is the run's
+        ``readImages``: the vision model reads the text inside the Document's
+        pictures.
         The index (and what CLASSIFYING chose) is recorded only if the
         revision and governing collection did not change meanwhile; otherwise
         the Document waits for another run and its payload is re-applied.
@@ -304,20 +332,92 @@ class ItemIngestionService:
                     structure_version=structure.ref.fingerprint,
                 ),
                 processed_version=self.processing_version(),
-                classification=(
-                    classification.for_document(
-                        started.ancestor_ids, started.source_code
-                    )
-                    if classification is not None
-                    else None
-                ),
-                classification_cache=(
-                    self._classifications.of(document.workspace_code, revision.content_id)
-                    if self._classifications is not None
-                    else None
-                ),
+                plan=plan,
+                ancestor_ids=started.ancestor_ids,
+                source_id=started.source_id,
+                classification_cache=self._classification_cache(document, revision),
                 progress=progress,
             )
+
+    async def classify_document(
+        self,
+        document_id: UUID,
+        *,
+        tenant_id: UUID,
+        progress: IndexProgress | None = None,
+        plan: ClassificationPlan | None,
+    ) -> int:
+        """CLASSIFY_ONLY: classify one Document's current revision again, index untouched.
+
+        Reuses the revision's stored Structured Document (parsed only when it
+        has none) and chunks it again; nothing is contextualized, embedded or
+        stored in the index, and the index state is not changed. The labels,
+        outcomes and profile are recorded only if the revision did not change
+        meanwhile. Returns the chunk count.
+        """
+
+        if self._structures is None:
+            raise RuntimeError(  # noqa: TRY004 - invalid service composition
+                "ItemIngestionService needs a StructureStore to classify documents"
+            )
+        async with advisory_lock_scope(
+            self._advisory_lock_key(document_id), engine=self._require_engine()
+        ):
+            started = await self._load_processable(document_id, tenant_id=tenant_id)
+            document = started.document
+            revision = started.revision
+            if progress is not None:
+                progress("parsing", 0, 0)
+            structure = await self._stored_structure(document, revision)
+            # Highlights are not needed to classify: no locator, no PDF read.
+            chunks = await asyncio.to_thread(
+                self._chunk, structure.document, document=document, revision=revision, locator=None
+            )
+            if plan is None:
+                return len(chunks)
+            item = _envelope(document, revision, source=started.source)
+            prepared = await self._prepare(
+                plan,
+                item,
+                chunks,
+                item_id=document.id,
+                ancestor_ids=started.ancestor_ids,
+                source_id=started.source_id,
+            )
+            if prepared is None:
+                return len(chunks)
+            classified = await self._index.classify_document(
+                item,
+                chunks,
+                classification=prepared.request,
+                cache=self._classification_cache(document, revision),
+                progress=progress,
+            )
+            async with transaction_scope(self._session_factory) as session:
+                row = await session.get(
+                    Item, document.id, with_for_update=True, populate_existing=True
+                )
+                current = await ItemService(session).current_revision(document.id)
+                if (
+                    row is None
+                    or row.deleted_at is not None
+                    or current is None
+                    or current.revision_number != revision.revision_number
+                ):
+                    log.info(
+                        "classification skipped: document %s changed while classifying",
+                        document.id,
+                    )
+                    return len(chunks)
+                await _record_classification(
+                    session,
+                    row,
+                    plan,
+                    prepared,
+                    classified,
+                    revision_number=revision.revision_number,
+                )
+            return len(chunks)
 
     async def process_item_content(
         self,
@@ -327,12 +427,16 @@ class ItemIngestionService:
         *,
         context: IndexingContext,
         processed_version: str,
-        classification: ClassificationRequest | None = None,
+        plan: ClassificationPlan | None = None,
+        ancestor_ids: tuple[UUID, ...] = (),
+        source_id: UUID | None = None,
         classification_cache: ClassificationCache | None = None,
         progress: IndexProgress | None = None,
     ) -> int:
         """Index the chunks of revision ``context.revision_number``'s Structured Document.
 
+        With a ``plan`` the Document is classified too: ``ancestor_ids`` and
+        ``source_id`` are what its collection and source rules match.
         ``classification_cache`` holds earlier classification answers of the
         content (:class:`StoredClassifications`).
         """
@@ -345,11 +449,23 @@ class ItemIngestionService:
             if any(chunk.item_id != item.id for chunk in chunks):
                 raise ValueError("canonical chunk belongs to a different document")
 
+            prepared = (
+                await self._prepare(
+                    plan,
+                    item,
+                    chunks,
+                    item_id=stored.id,
+                    ancestor_ids=ancestor_ids,
+                    source_id=source_id,
+                )
+                if plan is not None
+                else None
+            )
             count, classified = await self._index.index_item_content(
                 item,
                 chunks,
                 context=context,
-                classification=classification,
+                classification=prepared.request if prepared is not None else None,
                 classification_cache=classification_cache,
                 progress=progress,
             )
@@ -360,12 +476,60 @@ class ItemIngestionService:
                     stored.id,
                     context=context,
                     processed_version=processed_version,
+                    plan=plan,
+                    prepared=prepared,
                     classified=classified,
                 )
             return count
         except Exception:
             await self._record_failure(stored.id)
             raise
+
+    async def _prepare(
+        self,
+        plan: ClassificationPlan,
+        item: DocumentItem,
+        chunks: Sequence[Chunk],
+        *,
+        item_id: UUID,
+        ancestor_ids: tuple[UUID, ...],
+        source_id: UUID | None,
+    ) -> PreparedDocument | None:
+        """The Document's classification request; ``None`` (logged) when preparing failed:
+        CLASSIFYING is best effort and the Document is indexed with its labels unchanged."""
+
+        try:
+            return await prepare(
+                plan,
+                document_input(
+                    item, chunks, ancestor_ids=ancestor_ids, source_id=source_id, item_id=item_id
+                ),
+                self._signals,
+            )
+        except Exception:
+            log.warning("classification could not be prepared item_id=%s", item_id, exc_info=True)
+            return None
+
+    def _classification_cache(
+        self, document: Item, revision: ItemRevision
+    ) -> ClassificationCache | None:
+        if self._classifications is None:
+            return None
+        return self._classifications.of(document.workspace_code, revision.content_id)
+
+    async def _stored_structure(self, document: Item, revision: ItemRevision) -> ParsedStructure:
+        """The revision's stored Structured Document whatever profile parsed it; parsed
+        (current profile, no images) only when it has none."""
+
+        assert self._structures is not None
+        manifest = StructureManifest.parse(revision.exports)
+        if manifest is not None:
+            ref = StructureRef(document.workspace_code, revision.content_id, manifest.fingerprint)
+            try:
+                return ParsedStructure(ref, manifest, await self._structures.document(ref))
+            except StructureUnavailable:
+                pass
+        return await self._structures.ensure(document, revision=revision)
 
     # ---- Index payloads (item_model.md §4.10) ----
 
@@ -543,14 +707,14 @@ class ItemIngestionService:
             placement = (
                 await item_ancestry(session, decision) if decision is not None else path[1:]
             )
-            source, source_code = await _provider_identity(session, document.id)
+            source, source_id = await _provider_identity(session, document.id)
             return _ProcessingStart(
                 document=document,
                 collection_id=collection_id,
                 revision=revision,
-                ancestor_ids=tuple(str(node.item_id) for node in placement),
+                ancestor_ids=tuple(node.item_id for node in placement),
                 source=source,
-                source_code=source_code,
+                source_id=source_id,
             )
 
     @staticmethod
@@ -560,11 +724,13 @@ class ItemIngestionService:
         *,
         context: IndexingContext,
         processed_version: str,
+        plan: ClassificationPlan | None = None,
+        prepared: PreparedDocument | None = None,
         classified: DocumentClassification | None = None,
     ) -> None:
-        """Mark the index current and apply the classified topics (and an open
-        NEW_DOCUMENT contribution's suggestions), unless the content or
-        placement moved on meanwhile."""
+        """Mark the index current and record the classification (labels,
+        outcomes, profile and an open NEW_DOCUMENT contribution's suggestions),
+        unless the content or placement moved on meanwhile."""
 
         item = await session.get(Item, item_id, with_for_update=True, populate_existing=True)
         if item is None:
@@ -589,21 +755,10 @@ class ItemIngestionService:
             processed_version=processed_version,
             indexed_revision_number=context.revision_number,
         )
-        if classified is not None:
-            await apply_assistant_topics(
-                session, item_id, [UUID(topic.id) for topic in classified.topics]
+        if plan is not None and prepared is not None:
+            await _record_classification(
+                session, item, plan, prepared, classified, revision_number=context.revision_number
             )
-            contribution = (
-                await open_new_document_contributions(session, item.tenant_id, [item_id])
-            ).get(item_id)
-            if contribution is not None:
-                await replace_classified_suggestions(
-                    session,
-                    contribution,
-                    [UUID(topic.id) for topic in classified.topics],
-                    classified.summary,
-                    classified.title,
-                )
         if bool(item.is_published) != context.published:
             await items.mark_payload_dirty((item_id,), func.now())
 
@@ -642,17 +797,59 @@ class _ProcessingStart:
     #: CLASSIFYING's collection rules match these Item IDs: the Document's
     #: ancestors, or for an open NEW_DOCUMENT contribution's candidate its
     #: deciding collection and that collection's ancestors.
-    ancestor_ids: tuple[str, ...]
-    #: The provider identity of a synced Document and its Source's code
+    ancestor_ids: tuple[UUID, ...]
+    #: The provider identity of a synced Document and its ingestion source
     #: (CLASSIFYING's source rules); ``None`` for an upload.
     source: SourceIdentity | None
-    source_code: str | None
+    source_id: UUID | None
+
+
+async def _record_classification(
+    session: AsyncSession,
+    item: Item,
+    plan: ClassificationPlan,
+    prepared: PreparedDocument,
+    classified: DocumentClassification | None,
+    *,
+    revision_number: int,
+) -> None:
+    """Decide on the answer and write it: labels and outcomes per scheme, the
+    extracted profile, and an open NEW_DOCUMENT contribution's suggestions.
+
+    ``classified`` is ``None`` when the model failed: the schemes that needed
+    it keep their labels (outcome ``failed``); the rest is written. The
+    candidate of an open NEW_DOCUMENT contribution only gets suggestions.
+    """
+
+    # Imported here: contributions imports this module (sync_item_payloads).
+    from bomesh.services.knowledge_curation.contributions import (
+        record_classified_suggestions,
+    )
+
+    outcome = decide(plan, prepared, classified)
+    contribution = (
+        await open_new_document_contributions(session, item.tenant_id, [item.id])
+    ).get(item.id)
+    await replace_machine_assignments(
+        session,
+        item.id,
+        outcome.schemes,
+        revision_number=revision_number,
+        suggest_only=outcome.suggest_only or contribution is not None,
+    )
+    if outcome.write_profile:
+        await write_extracted_profile(
+            session, item.id, item.tenant_id, outcome.metadata, revision_number=revision_number
+        )
+    if contribution is not None and classified is not None:
+        await record_classified_suggestions(session, contribution, outcome.summary, outcome.title)
 
 
 async def _provider_identity(
     session: AsyncSession, document_id: UUID
-) -> tuple[SourceIdentity | None, str | None]:
-    """The ``external_resources`` identity of a synced Document, a live one first.
+) -> tuple[SourceIdentity | None, UUID | None]:
+    """The ``external_resources`` identity of a synced Document (a live one first)
+    and its ingestion source.
 
     A Source's NEW_REVISION candidate has none of its own: it carries the
     identity of the Document it would replace.
@@ -667,23 +864,17 @@ async def _provider_identity(
         .limit(1)
         .scalar_subquery()
     )
-    row = (
-        await session.execute(
-            select(ExternalResource, IngestionSource.code)
-            .join(IngestionSource, IngestionSource.id == ExternalResource.ingestion_source_id)
-            .where(
-                (ExternalResource.item_id == document_id) | (ExternalResource.item_id == replaced)
-            )
-            .order_by(
-                (ExternalResource.item_id == document_id).desc(),
-                ExternalResource.deleted_at.desc().nulls_first(),
-            )
-            .limit(1)
+    resource = await session.scalar(
+        select(ExternalResource)
+        .where((ExternalResource.item_id == document_id) | (ExternalResource.item_id == replaced))
+        .order_by(
+            (ExternalResource.item_id == document_id).desc(),
+            ExternalResource.deleted_at.desc().nulls_first(),
         )
-    ).first()
-    if row is None:
+        .limit(1)
+    )
+    if resource is None:
         return None, None
-    resource, code = row
     data = resource.provider_data
     try:
         identity = SourceIdentity(
@@ -696,7 +887,7 @@ async def _provider_identity(
         )
     except ValueError as exc:
         raise DocumentProcessingError("the document's source identity is invalid") from exc
-    return identity, code
+    return identity, resource.ingestion_source_id
 
 
 def _envelope(

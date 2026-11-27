@@ -79,7 +79,7 @@ Tri thức của doanh nghiệp hoặc trường đại học nằm rải rác �
 | G1 | Trả lời có căn cứ | Agent chỉ trích dẫn bằng chứng do công cụ `knowledge_search` trả về trong lượt hỏi đó. Marker không xác định sẽ không thành trích dẫn |
 | G2 | Phân quyền trước khi lộ dữ liệu | Qdrant lọc trước theo tenant và collection. PostgreSQL kiểm tra lại từng kết quả trước khi bằng chứng đến agent |
 | G3 | Một nguồn sự thật | PostgreSQL giữ trạng thái nghiệp vụ, object storage giữ bytes gốc, Qdrant chỉ là bản chiếu dựng lại được |
-| G4 | Quản trị tri thức | Collection, Contribution (đóng góp có duyệt), Topic, Publish/Unpublish, Revision, Audit log |
+| G4 | Quản trị tri thức | Collection, Contribution (đóng góp có duyệt), Taxonomy (concept scheme), Publish/Unpublish, Revision, Audit log |
 | G5 | Nạp dữ liệu bền vững | Ingestion Run tường minh, worker dùng PostgreSQL làm hàng đợi, retry an toàn, checkpoint đồng bộ nguồn |
 | G6 | Trải nghiệm người dùng tối giản | Quy tắc thiết kế sản phẩm bắt buộc, HeroUI, mỗi trang một mục đích |
 | G7 | Đo lường được | Bộ đánh giá retrieval, rò rỉ quyền (leak) và câu trả lời agent, có LLM judge |
@@ -130,7 +130,7 @@ Tri thức của doanh nghiệp hoặc trường đại học nằm rải rác �
 | Workspace | Đa tenant; template ENTERPRISE / CAMPUS; vòng đời workspace; thành viên, nhóm, vai trò tuỳ chỉnh; IAM policy |
 | Tri thức | Collection lồng nhau, Document, revision, link, publish/unpublish, move, merge, verify, xoá mềm/khôi phục, tìm kiếm có facet |
 | Đóng góp và kiểm duyệt | Contribution (tài liệu mới hoặc phiên bản mới), phân tích tự động, duyệt/từ chối/yêu cầu sửa |
-| Phân loại | Domain → Topic, quy tắc phân loại, gợi ý, đề xuất, sửa (topic corrections) |
+| Phân loại | Concept scheme nhiều trục (SKOS), template nền tảng, version và publish, rule, gợi ý nhãn, đề xuất concept, duyệt nhãn |
 | Thư viện cá nhân | Saved items, recent items, saved searches, reading lists, notifications, My files |
 | Nạp dữ liệu | Upload, ZIP, Confluence, Google Drive; Connection (OAuth/API token); Source có lịch cron; Sync; Ingestion Run; chính sách nạp |
 | Trợ lý AI | Hội thoại, streaming SSE, trích dẫn, đính kèm, sandbox xử lý tệp, artifacts, chia sẻ hội thoại, phản hồi, knowledge gaps |
@@ -174,7 +174,7 @@ flowchart LR
     M --> UC6[Xử lý tệp trong hội thoại - sandbox]
     R([Reviewer]) --> UC7[Duyệt contribution]
     R --> UC8[Chạy Ingestion Run cho ứng viên]
-    A([Workspace admin]) --> UC9[Quản lý collection, topic, IAM]
+    A([Workspace admin]) --> UC9[Quản lý collection, taxonomy, IAM]
     A --> UC10[Kết nối nguồn Confluence/Drive, lịch đồng bộ]
     A --> UC11[Xử lý hàng loạt, theo dõi lỗi]
     A --> UC12[Cấu hình trợ lý, thành viên, nhóm, vai trò]
@@ -189,10 +189,10 @@ flowchart LR
 | Hành trình | Các bước |
 |---|---|
 | **Tìm câu trả lời** | Đăng nhập → chọn workspace → Home → "Ask a question" → nhập câu hỏi hoặc chọn starter → câu trả lời stream theo nhịp *say → do → say → answer* (ghi chú ngắn → hành động "Searching your knowledge" → danh sách tài liệu tìm thấy → câu trả lời có số trích dẫn) → bấm trích dẫn → preview đúng đoạn ("Passage n of m") → "Open full document" → Reader. Tài liệu bị khoá chỉ hiện trích đoạn và nút "Request access" |
-| **Đóng góp tài liệu** | Knowledge → Contribute → thả tệp → **Analyzing** (trợ lý đọc tệp so với topic của workspace) → **Check the details** (tiêu đề, loại, topic kèm bằng chứng, collection, tóm tắt, cảnh báo dữ liệu cá nhân hoặc trùng lặp) → Submit for review → trạng thái *In review* |
+| **Đóng góp tài liệu** | Knowledge → Contribute → thả tệp → **Analyzing** (trợ lý đọc tệp, gợi ý nhãn concept theo các scheme của workspace) → **Check the details** (tiêu đề, loại, nhãn concept, collection, tóm tắt, cảnh báo dữ liệu cá nhân hoặc trùng lặp) → Submit for review → trạng thái *In review* |
 | **Duyệt** | Reviewer → Knowledge Studio → Documents → Review → chạy xử lý ứng viên → Approve / Request changes / Reject |
-| **Thiết lập tri thức (admin)** | Collections → Topics (từ khoá, đồng nghĩa) → Sources → Add source (App → Account → Content → Destination, lịch, chính sách xuất bản) → sync lần đầu → Process |
-| **Xử lý hàng loạt** | Documents → All → "Not processed" → "Select all matching" → hộp thoại Process (phạm vi topic, AI context tuỳ chọn, ghi chú "nothing is published") → thanh tiến độ → lỗi chuyển sang Documents → Issues |
+| **Thiết lập tri thức (admin)** | Collections → Taxonomy (fork template, concept, nhãn, publish) → Sources → Add source (App → Account → Content → Destination, lịch, chính sách xuất bản) → sync lần đầu → Process |
+| **Xử lý hàng loạt** | Documents → All → "Not processed" → "Select all matching" → hộp thoại Process (concept gợi ý, AI context tuỳ chọn, ghi chú "nothing is published") → thanh tiến độ → lỗi chuyển sang Documents → Issues |
 | **Làm việc với tệp** | Đính kèm tối đa 5 tệp, mỗi tệp 100 MB → agent chạy code trong sandbox → tệp kết quả hiện dưới dạng thẻ có Preview / Changes / History → mỗi lần sửa tạo một phiên bản mới và có thể khôi phục |
 | **Onboarding** | Product tour lần đầu, mỗi người mỗi workspace một lần; xem lại qua Help → Product tour |
 
@@ -241,13 +241,14 @@ flowchart LR
 - Muốn duyệt `NEW_DOCUMENT` thì ứng viên phải đã được xử lý (nếu chưa: lỗi `CANDIDATE_NOT_PROCESSED`). Duyệt **không** tự khởi chạy ingestion.
 - Nguồn có chính sách `REVIEW_FIRST` sinh contribution `SOURCE` cho tài liệu mới hoặc đã thay đổi.
 
-### 6.5 Topics (Phân loại)
+### 6.5 Taxonomy (Phân loại nhiều trục)
 
-- Phân cấp DOMAIN → TOPIC; trạng thái PROPOSED / ACTIVE / REJECTED.
-- Mỗi topic có từ khoá, từ đồng nghĩa, hướng dẫn, tối đa 5 tài liệu ví dụ, quy tắc theo collection hoặc theo nguồn.
-- Các thao tác: `:accept`, `:merge`, `:reject`, `:confirmAssignments`, `:import` (CSV/XLSX), `:testClassification`, `:compileClassificationPrompt`.
-- Giai đoạn CLASSIFYING trong ingestion: áp quy tắc trước; nếu không khớp thì gọi mô hình một lần trên tiêu đề và khoảng 12.000 ký tự trích đoạn. Bước này best-effort.
-- Topic **không** đi vào payload chỉ mục hay nội dung chunk.
+- Mỗi workspace có nhiều concept scheme độc lập theo SKOS, fork từ template nền tảng: scheme *phân loại* (lĩnh vực, chức năng, loại văn bản, đối tượng) gán nhãn cho tài liệu; scheme *authority* (đơn vị, chương trình) cung cấp giá trị metadata (đơn vị ban hành, phạm vi áp dụng, affiliation của thành viên).
+- Concept có notation bất biến, prefLabel/altLabel/hiddenLabel theo ngôn ngữ, `broader` (nhiều cha) và `related`, định nghĩa, ví dụ, pattern; vòng đời draft → published → deprecated (kèm `replacedBy`). Mỗi scheme có số nhãn tối thiểu/tối đa, nhãn chính, độ sâu, ngưỡng tự động và ngưỡng duyệt.
+- `:publish` kiểm tra invariant, lưu một version bất biến (snapshot, diff, cảnh báo) và chỉ phân loại lại đúng phần bị ảnh hưởng: merge chuyển nhãn bằng SQL, split và thêm concept con rerank trên tài liệu liên quan, đổi ngưỡng định tuyến lại theo confidence đã lưu; đổi tên, định nghĩa hay vị trí không phân loại lại.
+- Các thao tác khác: `:importConcepts` (CSV), `:deprecate`, `:confirmAssignments` / `:rejectAssignments` theo filter, `:diffTemplate` / `:applyTemplateChanges`, export Turtle / JSON-LD, ConceptRule (`implies` / `prior`), ConceptProposal sinh từ cụm tài liệu chưa chắc và từ sửa nhãn của người duyệt, `testClassification`, `compileClassificationPrompt`.
+- Giai đoạn CLASSIFYING trong ingestion: pattern, rule, lexical và kNN trước; chỉ gọi mô hình một lần cho các scheme còn chưa chắc. Nhãn có nguồn, confidence, trạng thái (suggested / accepted / rejected) và bằng chứng; nhãn của người không bao giờ bị máy ghi đè.
+- Phía truy vấn: SearchItems và agent hiểu thuật ngữ trong câu hỏi thành concept (lọc và facet theo cây, boost theo scheme khớp, phạm vi áp dụng và độ mới); nhãn không đi vào nội dung chunk.
 
 ### 6.6 Library (Thư viện cá nhân)
 
@@ -452,13 +453,14 @@ Các bất biến quyền khác:
 - Signed URL được cấp theo từng request, sau khi kiểm tra quyền, và có thời hạn ngắn.
 - Tài liệu từ connector kế thừa quyền của collection đích.
 
-### 9.4 Danh mục bảng (61 bảng theo `design.dbml`)
+### 9.4 Danh mục bảng (75 bảng theo `design.dbml`)
 
 | Nhóm | Bảng |
 |---|---|
 | **Identity** (4) | `users`, `auth_identities`, `access_sessions`, `password_reset_tokens` |
 | **Workspace & IAM** (10) | `tenants`, `roles`, `permissions`, `role_permissions`, `role_assignments`, `tenant_memberships`, `groups`, `group_memberships`, `request_idempotency`, `operations` |
-| **Knowledge** (16) | `items`, `item_index_states`, `item_revisions`, `item_uploads`, `citations`, `contributions`, `topics`, `item_topics`, `topic_corrections`, `contribution_topics`, `reading_lists`, `reading_list_entries`, `item_links`, `saved_items`, `recent_items`, `saved_searches` |
+| **Knowledge** (17) | `items`, `item_index_states`, `item_revisions`, `item_uploads`, `citations`, `contributions`, `item_concepts`, `item_classifications`, `document_profiles`, `document_applicability`, `document_supersessions`, `reading_lists`, `reading_list_entries`, `item_links`, `saved_items`, `recent_items`, `saved_searches` |
+| **Taxonomy** (13) | `concept_schemes`, `concepts`, `concept_labels`, `concept_relations`, `concept_closure`, `concept_replacements`, `concept_groups`, `concept_group_members`, `concept_mappings`, `concept_rules`, `concept_scheme_versions`, `concept_proposals`, `concept_proposal_items` |
 | **Ingestion** (9) | `integration_connections`, `integration_credentials`, `ingestion_sources`, `ingestion_syncs`, `external_resources`, `ingestion_runs`, `ingestion_run_items`, `ingestion_policies`, `platform_connector_settings` |
 | **Assistant** (12) | `conversations`, `sandbox_sessions`, `messages`, `message_items`, `artifacts`, `artifact_source_items`, `evidence_review_cells`, `conversation_shares`, `conversation_share_recipients`, `memories`, `workspace_assistant_settings`, `knowledge_gap_decisions` |
 | **Collaboration** (7) | `spaces`, `space_materials`, `space_announcements`, `space_events`, `request_types`, `requests`, `request_messages` |
@@ -483,8 +485,9 @@ erDiagram
     ITEMS ||--o{ ROLE_ASSIGNMENTS : collection_grants
     ITEMS ||--o{ ITEM_LINKS : links
     ITEMS ||--o{ CONTRIBUTIONS : candidate
-    TOPICS ||--o{ ITEM_TOPICS : tags
-    ITEMS ||--o{ ITEM_TOPICS : tagged
+    CONCEPT_SCHEMES ||--o{ CONCEPTS : contains
+    CONCEPTS ||--o{ ITEM_CONCEPTS : labels
+    ITEMS ||--o{ ITEM_CONCEPTS : labelled
     INTEGRATION_CONNECTIONS ||--o| INTEGRATION_CREDENTIALS : secret
     INTEGRATION_CONNECTIONS ||--o{ INGESTION_SOURCES : feeds
     INGESTION_SOURCES ||--o{ INGESTION_SYNCS : runs
@@ -543,7 +546,7 @@ erDiagram
 | **Identity** | `users`, `users/{u}/preferences`, `sessions` | `users:lookup`, `:activate`, `:suspend`, `users:sendPasswordReset`, `users:resetPassword` |
 | **Workspaces** | `workspaces`, `settings`, `assistant`, `overview`, `members`, `groups`, `memberships`, `roles`, `permissions`, `auditEvents`, `knowledgeGaps` | `:archive`, `:suspend`, `:pauseIngestion`, `:setIamPolicy`, `:analyzeIamPolicy`, `workspaces:summarizeUsage`, `auditEvents:export` |
 | **Library** | `members/{m}/home`, `notifications`, `recentItems`, `savedItems`, `savedSearches` | `:markRead`, `recentItems:clear` |
-| **Knowledge** | `items`, `items/{i}/preview`, `passages`, `revisions`, `links`, `contributions`, `topics`, `topicCorrections`, `readingLists/entries` | `items:search`, `:completeUpload`, `:publish`, `:move`, `:merge`, `:verify`, `revisions:rollback`, `contributions:approve`, `topics:testClassification` |
+| **Knowledge** | `items`, `items/{i}/preview`, `passages`, `revisions`, `links`, `contributions`, `conceptSchemes` (`concepts`, `groups`, `versions`), `conceptRules`, `conceptProposals`, `sharedLabels`, `readingLists/entries` | `items:search`, `:completeUpload`, `:publish`, `:move`, `:merge`, `:verify`, `revisions:rollback`, `contributions:approve`, `conceptSchemes:publish`, `conceptSchemes:testClassification` |
 | **Ingestion** | `connectors`, `connections`, `sources`, `syncs`, `ingestionRuns`, `tasks`, `ingestionPolicies/default` | `connections:browseResources`, `:reauthorize`, `:test`, `syncs:pause`, `tasks:retry`, `ingestionRuns:summarize` |
 | **Assistant** | `conversations`, `messages`, `shares`, `artifacts`, `artifacts/{a}/revisions` | `conversations:converse` (SSE), `messages:submitFeedback`, `shares:converse`, `artifacts:export` |
 | **Collaboration** | `spaces` (`members`, `materials`, `announcements`, `events`, `requestTypes`), `requests`, `messages` | `spaces:join`, `:leave`, `requests:approve`, `:deny`, `:sendBack`, `:answer` |
@@ -668,7 +671,7 @@ XỬ LÝ (Ingestion Run: thủ công, API, theo lịch)
 |---|---|
 | FETCHING | Đọc bản gốc từ object storage |
 | PARSING | Docling / PDFium / VLM → `DoclingDocument` |
-| CLASSIFYING | (Tuỳ chọn) gán topic: quy tắc trước, rồi một lần gọi LLM; best-effort |
+| CLASSIFYING | Gán nhãn concept cho từng scheme phân loại: pattern, rule, lexical và kNN trước, chỉ gọi LLM một lần khi còn scheme chưa chắc; trích metadata (số hiệu, ngày, đơn vị ban hành, phạm vi áp dụng); best-effort |
 | CHUNKING | `HybridChunker` (lặp lại header bảng), sinh `contextual_text` cho mỗi chunk; `chunk_text` gốc giữ làm văn bản bằng chứng |
 | EMBEDDING | Gọi theo lô 32 qua OpenRouter (`EMBEDDING_MODEL`). Lỗi 4xx từ provider → `PROVIDER_REFUSED` và dừng run; timeout, 429, 5xx → retry |
 | INDEXING | `replace_item_points` thay toàn bộ điểm của Item (ID chunk xác định, nên retry an toàn). Citation và geometry ghi vào PostgreSQL |
@@ -955,7 +958,7 @@ sequenceDiagram
         W->>S3: đọc bản gốc
         W->>D: PARSING (text layer, VLM cho trang scan)
         D-->>W: DoclingDocument
-        opt Có topic ứng viên
+        opt Workspace có scheme phân loại đã publish
             W->>L: CLASSIFYING (rule trước, rồi 1 lần gọi)
         end
         W->>W: HybridChunker thành chunks + citation spans
@@ -1075,12 +1078,12 @@ sequenceDiagram
     R->>API: GetItem / preview ứng viên (chỉ khi contribution đang mở)
     R->>API: CreateIngestionRun {items: [candidate]}
     W->>PG: xử lý + CLASSIFYING theo collection đích
-    W->>PG: cập nhật suggestions bằng topic và tóm tắt
+    W->>PG: cập nhật suggestions bằng nhãn concept và tóm tắt
     alt Phê duyệt
-        R->>API: contributions:approve {etag, targetCollection, topics, summary}
+        R->>API: contributions:approve {etag, targetCollection, concepts, summary}
         API->>PG: check CANDIDATE_NOT_PROCESSED
         API->>PG: move ứng viên, is_published true (hoặc revision n+1)
-        API->>PG: item_topics, topic_corrections, state APPROVED, audit
+        API->>PG: item_concepts (nhãn người duyệt), state APPROVED, audit
         API->>Q: (sau commit) cập nhật payload collection_item_id, published
     else Yêu cầu sửa
         R->>API: :requestChanges thành CHANGES_REQUESTED
@@ -1270,16 +1273,16 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant CLI as python -m eval run
-    participant DS as Dataset questions.jsonl
+    participant CLI as python -m eval bench
+    participant DS as Suite questions.jsonl
     participant RN as runner
     participant RET as Retrieval (fused + final)
     participant LK as Leak probes
     participant AG as Agent.run (benchmark user)
     participant J as LLM Judge (OPENROUTER_MODEL)
-    participant OUT as runs/dataset/timestamp
+    participant OUT as runs/suite/timestamp
 
-    CLI->>DS: load câu hỏi + gold {item_id, quote}
+    CLI->>DS: load câu hỏi + gold {file, quote}, gắn file với item của lần ingest cuối
     loop variant in configured, fused, rerank
         RN->>RET: search_item_content + retriever.search
         RN->>RN: Hit@k, Recall@k, MRR, nDCG@k
@@ -1437,7 +1440,7 @@ flowchart TB
     end
     subgraph MG["Manage (cần quyền quản trị)"]
         OV[Overview - Knowledge health]
-        ST[Knowledge Studio - Documents, Collections, Topics, Sources]
+        ST[Knowledge Studio - Documents, Collections, Taxonomy, Sources]
         PP[People - Members, Groups, Roles, Access requests]
         AS[Assistant]
         AC[Activity - Changes, Sign-ins]
@@ -1461,7 +1464,7 @@ flowchart TB
 - **Home:** bản đồ tri thức (workspace › collection › folder › document trên canvas pan/zoom), "Find in the map", inspector "★ Read first".
 - **AI Chat:** nhịp *say → do → say → answer*, các dòng tài liệu tìm thấy, câu trả lời có số trích dẫn.
 - **Reader:** đọc tài liệu với ba tab Ask (câu trả lời tô sáng trên trang), About (nguồn, độ tin cậy, phiên bản, ai được xem), Related.
-- **Knowledge Studio:** Documents (All / Review / Issues / Quality), Topics (Topics / Suggestions), Sources (Sources / Sync history / Accounts).
+- **Knowledge Studio:** Documents (All / Review / Issues / Quality), Taxonomy (các scheme / Suggestions), Sources (Sources / Sync history / Accounts).
 - **People:** thêm thành viên qua email, đổi vai trò inline hoặc hàng loạt có Undo, xem quyền hiệu lực.
 
 ---
@@ -1672,7 +1675,7 @@ Lệnh Makefile: `services`, `reset-all`, `status`, `db-init`, `db-seed`, `db-se
 | Document | Tài nguyên tri thức có bản gốc lưu trong object storage |
 | Revision | Phiên bản nội dung bất biến của Document hoặc Artifact |
 | Contribution | Đề xuất đưa tài liệu hoặc phiên bản mới vào collection, cần duyệt |
-| Topic / Domain | Hệ phân loại hai cấp |
+| Concept scheme / Concept | Hệ phân loại nhiều trục (facet) theo SKOS: mỗi scheme (lĩnh vực, chức năng, loại văn bản, đối tượng; đơn vị, chương trình) là một cây concept có version |
 | Item link | Tham chiếu hiển thị tài liệu ở collection khác, không cấp quyền |
 | Connection | Cấu hình và credential kết nối đến một nhà cung cấp |
 | Source | Một phạm vi bên ngoài có checkpoint, đổ vào đúng một collection |
@@ -1706,7 +1709,7 @@ Lệnh Makefile: `services`, `reset-all`, `status`, `db-init`, `db-seed`, `db-se
 `/{w}/members/{m}/home` · `/notifications(:markRead)` · `/recentItems(:clear)` · `/savedItems` · `/savedSearches`
 
 **Knowledge**
-`/{w}/items` · `/{w}/items:search` · `/{w}/items/{i}` · `:completeUpload|:publish|:unpublish|:move|:merge|:verify|:undelete` · `:getIamPolicy|:setIamPolicy|:testIamPermissions` · `/items/{i}/preview` · `/items/{i}/passages/{p}` · `/items/{i}/revisions(:rollback)` · `/items/{i}/links` · `/{w}/contributions(:approve|:reject|:requestChanges|:resubmit|:withdraw)` · `/{w}/topics(:accept|:merge|:reject|:confirmAssignments|:import|:testClassification|:compileClassificationPrompt)` · `/{w}/topicCorrections(:dismiss)` · `/{w}/readingLists(/entries, :copy)` · `POST /upload/api/v1/workspaces/{w}/items`
+`/{w}/items` · `/{w}/items:search` · `/{w}/items/{i}` · `:completeUpload|:publish|:unpublish|:move|:merge|:verify|:undelete` · `:getIamPolicy|:setIamPolicy|:testIamPermissions` · `/items/{i}/preview` · `/items/{i}/passages/{p}` · `/items/{i}/revisions(:rollback)` · `/items/{i}/links` · `/{w}/contributions(:approve|:reject|:requestChanges|:resubmit|:withdraw)` · `/{w}/conceptSchemes(:publish|:diffTemplate|:applyTemplateChanges|:importConcepts)` · `/{w}/conceptSchemes:testClassification|:compileClassificationPrompt` · `/{w}/conceptSchemes/{s}/concepts(:deprecate|:confirmAssignments|:rejectAssignments)` · `/{w}/conceptSchemes/{s}/groups` · `/{w}/conceptSchemes/{s}/versions(:export)` · `/{w}/conceptRules` · `/{w}/conceptProposals(:accept|:reject)` · `/{w}/sharedLabels` · `/conceptSchemes` (template nền tảng) · `/{w}/readingLists(/entries, :copy)` · `POST /upload/api/v1/workspaces/{w}/items`
 
 **Ingestion**
 `/connectors(:enable|:disable)` · `/ingestionPolicies/default` · `/{w}/connections(:browseResources|:reauthorize|:test)` · `/{w}/sources` · `/{w}/sources/{s}/syncs(:pause|:resume)` · `/{w}/ingestionRuns(:summarize)` · `/{w}/ingestionRuns/{r}/tasks(:cancel|:retry)` · `GET /oauth/callback`

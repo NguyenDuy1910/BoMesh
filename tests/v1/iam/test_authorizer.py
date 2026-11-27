@@ -219,22 +219,22 @@ async def test_revoking_a_permission_from_a_role_removes_it_from_its_holders(
     """A tombstoned role permission must stop granting, not linger in a join."""
     admin = await world.make_user()
     workspace = await world.make_workspace(admin)
-    curator_role = await world.make_role(workspace, "curator", ["members.list", "topics.create"])
+    curator_role = await world.make_role(workspace, "curator", ["members.list", "concepts.create"])
     curator = await world.add_member(workspace, role=curator_role)
     you = principal(curator)
-    assert {"members.list", "topics.create"} <= await world.authorizer().workspace_permissions(
+    assert {"members.list", "concepts.create"} <= await world.authorizer().workspace_permissions(
         you, workspace.id
     )
 
     await world.set_role_permissions(curator_role, ["members.list"])
 
     held = await world.authorizer().workspace_permissions(you, workspace.id)
-    assert "members.list" in held and "topics.create" not in held
+    assert "members.list" in held and "concepts.create" not in held
     async with world.sessions() as session:
         revoked = await session.scalar(
             select(RolePermission).where(
                 RolePermission.role_id == curator_role.id,
-                RolePermission.permission_code == "topics.create",
+                RolePermission.permission_code == "concepts.create",
             )
         )
     assert revoked is not None and revoked.deleted_at is not None

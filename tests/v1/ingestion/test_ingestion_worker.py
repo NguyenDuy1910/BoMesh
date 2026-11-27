@@ -73,15 +73,21 @@ class _Ingestion:
         self.blocked = asyncio.Event()
         self.cancelled = asyncio.Event()
         self.finished: list[UUID] = []
-        self.classification_requests = 0
+        self.classification_plans = 0
+        self.classified: list[UUID] = []
         self.read_images: list[bool] = []
 
     def processing_version(self) -> str:
         return "test-version"
 
-    async def classification_request(self, tenant_id: UUID, classification: Any) -> Any:
-        self.classification_requests += 1
+    async def classification_plan(self, tenant_id: UUID, classification: Any) -> Any:
+        self.classification_plans += 1
         return None
+
+    async def classify_document(
+        self, document_id: UUID, *, tenant_id: UUID, progress: Any = None, plan: Any = None
+    ) -> None:
+        self.classified.append(document_id)
 
     async def process_document(
         self,
@@ -89,7 +95,7 @@ class _Ingestion:
         *,
         tenant_id: UUID,
         progress: Any,
-        classification: Any = None,
+        plan: Any = None,
         read_images: bool = False,
     ) -> int:
         call = len(self.calls)
@@ -230,7 +236,7 @@ async def test_a_run_whose_worker_died_is_recovered_and_resumed(
     assert (tasks[interrupted].status, tasks[interrupted].error_class) == ("failed", "interrupted")
     assert {tasks[item].status for item in items[1:]} == {"succeeded"}
     assert sorted(ingestion.calls) == sorted(items[1:])
-    assert ingestion.classification_requests == 1
+    assert ingestion.classification_plans == 1
     assert await _index_statuses(sessions, [interrupted]) == {"pending"}
 
 
@@ -381,7 +387,7 @@ async def test_two_workers_never_execute_the_same_run(
     assert (await _run(sessions, run_id)).status == "succeeded"
     calls = sorted((len(ingestion.calls) for ingestion in ingestions))
     assert calls == [0, 6]
-    assert sum(ingestion.classification_requests for ingestion in ingestions) == 1
+    assert sum(ingestion.classification_plans for ingestion in ingestions) == 1
 
 
 async def test_a_due_schedule_fires_once_and_moves_to_its_next_firing(

@@ -392,7 +392,7 @@ export interface paths {
         };
         /**
          * List audit events.
-         * @description Filter on `category`, `actor`, `outcome`, `action` (the operationId, e.g. `action = "ImportTopics"`), `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. `totalSize` counts the filtered events. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
+         * @description Filter on `category`, `actor`, `outcome`, `action` (the operationId, e.g. `action = "ImportConcepts"`), `createTime`. `workspaces/-/auditEvents` lists across workspaces (platform `auditEvents.list`); names stay canonical. `totalSize` counts the filtered events. For `workspaces/-` reads and platform callers, `target` and `description` are omitted so no workspace content leaves the workspace.
          */
         get: operations["ListAuditEvents"];
         put?: never;
@@ -774,6 +774,30 @@ export interface paths {
          * @description Ends the membership; the account is untouched. Self → FAILED_PRECONDITION (400, reason SELF_MODIFICATION); last admin → FAILED_PRECONDITION (400, reason LAST_ADMIN).
          */
         delete: operations["DeleteMember"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a member's affiliation.
+         * @description Mutable: `affiliation` only (`*` allowed; an omitted mask means the populated fields; any other path → INVALID_ARGUMENT on `updateMask`); `affiliation.source` becomes ADMIN, an empty affiliation clears it. `units[i]` / `programs[i]` must be published concepts of the workspace's published `org-unit` / `program` scheme, `cohort` 1900–2100 and only with a unit or program — else INVALID_ARGUMENT on that field. Plain members cannot change their own affiliation (403). Audited (people).
+         */
+        patch: operations["UpdateMember"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/members:importAffiliations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import member affiliations from the registrar list.
+         * @description Sets the affiliation of the members the rows name by email (`affiliation.source` DIRECTORY). `program` matches a program notation, concept name or the code of an exact mapping; `unit` an org-unit notation or concept name; `cohort` is the entry year. Atomic: any bad row (unknown member, program or unit, cohort out of range or conflicting between rows of one member) → INVALID_ARGUMENT with violations on `rows[i].email|program|unit|cohort`, nothing written. Members whose affiliation an admin set are left untouched and listed in `skippedMembers`. `validateOnly` validates fully and writes nothing. DeleteMember and leaving the workspace delete the affiliation. Audited (people).
+         */
+        post: operations["ImportMemberAffiliations"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1570,7 +1594,7 @@ export interface paths {
         put?: never;
         /**
          * Approve a contribution.
-         * @description IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_DOCUMENT: the candidate is processed before it is decided — its `indexingState` is SUCCEEDED, OUTDATED or UNSUPPORTED (else reason CANDIDATE_NOT_PROCESSED); NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED) and the candidate has the `itemType` of `replacesItem` (else reason ITEM_TYPE_MISMATCH). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `title` (the published document's `displayName`; `fileName` is unchanged), `topics` and `summary` are applied to the published document. Approval never starts an ingestion run: a NEW_DOCUMENT candidate was processed before review (CreateIngestionRun with the candidate in `items[]`), so after approval its index stays current and only its payload follows the new placement; a NEW_REVISION's appended revision is processed afterwards by a separate CreateIngestionRun. State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400).
+         * @description IN_REVIEW → APPROVED. Requires `contributions.review` AND `items.publish` on the target collection (NEW_REVISION: the governing collection of `replacesItem`), else PERMISSION_DENIED. When `targetCollection` is empty, the deciders are holders of `contributions.review` on the target collection; when `targetCollection` is empty, on the assistant-suggested collection or at workspace level (tenant admins). Takes the contribution `etag` the reviewer saw (required; mismatch → ABORTED 409). Preconditions (FAILED_PRECONDITION): the candidate is ACTIVE with `contentState: AVAILABLE`; NEW_DOCUMENT: the candidate is processed before it is decided — its `indexingState` is SUCCEEDED, OUTDATED or UNSUPPORTED (else reason CANDIDATE_NOT_PROCESSED); NEW_REVISION: `replacesItem` has not moved since the contribution was created (else reason TARGET_MOVED) and the candidate has the `itemType` of `replacesItem` (else reason ITEM_TYPE_MISMATCH). Effects, in one transaction: NEW_DOCUMENT/MEMBER → the item moves into `targetCollection` and is PUBLISHED; NEW_DOCUMENT/SOURCE → the item is PUBLISHED in place; NEW_REVISION → a new revision of `replacesItem` is appended from the candidate's stored object (no copy), its `mimeType`, `sizeBytes`, `fileName` follow the new revision, its derived preview is reset, its `indexingState` becomes PENDING, and the candidate is deleted. `title` (the published document's `displayName`; `fileName` is unchanged), `concepts` and `summary` are applied to the published document. Approval never starts an ingestion run: a NEW_DOCUMENT candidate was processed before review (CreateIngestionRun with the candidate in `items[]`), so after approval its index stays current and only its payload follows the new placement; a NEW_REVISION's appended revision is processed afterwards by a separate CreateIngestionRun. State machine: ANALYZING → IN_REVIEW (system); IN_REVIEW → APPROVED (approve) | CHANGES_REQUESTED (requestChanges) | REJECTED (reject) | WITHDRAWN (withdraw); CHANGES_REQUESTED → ANALYZING (resubmit) | WITHDRAWN (withdraw). APPROVED, REJECTED, WITHDRAWN are terminal. Any other transition → FAILED_PRECONDITION (400).
          */
         post: operations["ApproveContribution"];
         delete?: never;
@@ -1668,7 +1692,7 @@ export interface paths {
         };
         /**
          * List items.
-         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = "workspaces/w/items/a" OR name = "workspaces/w/items/b"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item shortcuts never match), `itemKind`, `itemType`, `displayName` (`displayName = "*term*"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.languageCode`, `spaces:` (`spaces:"workspaces/w/spaces/s"`: items the space holds as materials — a pinned item itself, or anything under a pinned collection, i.e. the space's collections with their whole subtree), `document.purpose`, `document.topics:` (hierarchical: a DOMAIN also matches documents tagged with any topic under it), `document.assistantTopics:` (the same, over assistant-applied topics only), `document.owner`, `document.summary` (a blank summary is unset, so `NOT document.summary:*` lists documents without one), `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), and any other field `field:*` (set), so `NOT document.topics:*` lists documents without a topic and `NOT document.owner:*` those without an owner. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, topic, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemKind`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
+         * @description Returns only visible items (visibility rule; never the reviewer exception). `showDeleted=true` adds DELETED items only for holders of `items.undelete` (resolved through the deleted cohort's ancestors; the published rule still applies). AIP-160 `filter` over `name` (batch read by name: `name = "workspaces/w/items/a" OR name = "workspaces/w/items/b"`; names the caller cannot read, or that do not exist, are simply absent instead of PERMISSION_DENIED; another workspace's name → INVALID_ARGUMENT), `parentItem` (`parentItem=""` = roots), `ancestors:` (subtree; canonical tree only, item shortcuts never match), `itemKind`, `itemType`, `displayName` (`displayName = "*term*"` matches a substring, case-insensitive: `*` is the wildcard of every string field, `!=` negates it, `%` and `_` are literal), `document.mimeType`, `document.languageCode`, `spaces:` (`spaces:"workspaces/w/spaces/s"`: items the space holds as materials — a pinned item itself, or anything under a pinned collection, i.e. the space's collections with their whole subtree), `document.purpose`, `document.concepts:` (ACCEPTED assignments, hierarchical through the published hierarchy: a concept also matches documents assigned any concept under it; compose OR within a scheme and AND across schemes with AIP-160; a scheme name `document.concepts:"workspaces/w/conceptSchemes/s"` matches documents with any ACCEPTED whole-document concept of that scheme, so `NOT document.concepts:"…/conceptSchemes/s"` lists those still without one), `document.suggestedConcepts:` (the same over SUGGESTED assignments, concept or scheme names), `document.uncertainSchemes:` (scheme names: the classifier was not sure enough to assign a concept of that scheme, the unclassified pool; `:*` = uncertain in some scheme), `document.issuance.issuer` (`=`/`!=`), `document.applicability.units:`, `document.applicability.programs:` (hierarchical in their authority schemes; `:*`), `document.owner`, `document.summary` (a blank summary is unset, so `NOT document.summary:*` lists documents without one), `document.publicationState`, `document.collectionKind` (`STANDARD` = the workspace's shared knowledge, `PERSONAL` = members' My files), `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `document.qualityIssues`, `updateTime`. A repeated field also takes the presence test `field:*` (at least one value), and any other field `field:*` (set), so `NOT document.concepts:*` lists documents without an accepted concept and `NOT document.owner:*` those without an owner. The `document.qualityIssues` filter is for editors only; others get INVALID_ARGUMENT. A filter naming an item, concept, source or member the caller cannot read → PERMISSION_DENIED (403). `orderBy`: `displayName`, `updateTime`, `createTime`, `itemKind`. `showLocked=true` adds discoverable roots as LOCKED; LOCKED items never carry counts and sort last by `displayName`.
          */
         get: operations["ListItems"];
         put?: never;
@@ -1706,7 +1730,7 @@ export interface paths {
         head?: never;
         /**
          * Update item metadata.
-         * @description Mutable: `displayName`, `collection.description`, `collection.discoverable`, `collection.acceptsContributions`, `collection.inheritAccess` (also needs `items.setIamPolicy`), `document.topics`, `document.summary`, `document.languageCode`, `document.owner`. Any other path in `updateMask` → INVALID_ARGUMENT (use MoveItem for `parentItem`). No side effects. Stale etag → ABORTED (409).
+         * @description Mutable: `displayName`, `collection.description`, `collection.discoverable`, `collection.acceptsContributions`, `collection.inheritAccess` (also needs `items.setIamPolicy`), `document.concepts`, `document.issuance`, `document.applicability` (each replaces the whole field; issuance and applicability set by a person are never overwritten by extraction), `document.summary`, `document.languageCode`, `document.owner`. Any other path in `updateMask` → INVALID_ARGUMENT (use MoveItem for `parentItem`). No side effects. Stale etag → ABORTED (409).
          */
         patch: operations["UpdateItem"];
         trace?: never;
@@ -1930,7 +1954,7 @@ export interface paths {
         put?: never;
         /**
          * Merge this duplicate document into another.
-         * @description Documents only. In one transaction, every reference to this duplicate — item shortcuts, saved items, recent items, space materials and message attachments — is re-pointed to `targetItem` (a reference the target already has wins; the duplicate's is dropped), the duplicate is soft-deleted (and returned) and the merge is recorded in the audit log. Historical records (topic corrections, audit, notifications) keep naming the duplicate. UndeleteItem restores only the duplicate; re-pointed references stay on the target. A target the caller cannot see (visibility rule) → PERMISSION_DENIED (403); target is this item, a COLLECTION or deleted → FAILED_PRECONDITION. While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Stale etag → ABORTED (409).
+         * @description Documents only. In one transaction, every reference to this duplicate — item shortcuts, saved items, recent items, space materials and message attachments — is re-pointed to `targetItem` (a reference the target already has wins; the duplicate's is dropped), the duplicate is soft-deleted (and returned) and the merge is recorded in the audit log. Historical records (audit, notifications) keep naming the duplicate. UndeleteItem restores only the duplicate; re-pointed references stay on the target. A target the caller cannot see (visibility rule) → PERMISSION_DENIED (403); target is this item, a COLLECTION or deleted → FAILED_PRECONDITION. While a contribution on this item is open (ANALYZING, IN_REVIEW, CHANGES_REQUESTED) → FAILED_PRECONDITION reason CONTRIBUTION_OPEN. Stale etag → ABORTED (409).
          */
         post: operations["MergeItem"];
         delete?: never;
@@ -2090,7 +2114,7 @@ export interface paths {
         put?: never;
         /**
          * Search documents.
-         * @description The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. The filter accepts the ListItems fields (including `document.languageCode` and `spaces:`). Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`, except `name` restrictions (unreadable or missing names are simply absent, as in ListItems). Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item shortcuts never extend it.
+         * @description The one catalog and retrieval search (Browse, ⌘K, /search, Related via `relatedItem`, assistant passage retrieval). Returns DOCUMENT items only. The filter applies the visibility rule (never the reviewer exception), so editors also find UNPUBLISHED documents in collections where they hold `items.update`; every hit is re-authorized in PostgreSQL. The filter accepts the ListItems fields (including `document.languageCode` and `spaces:`). Facet counts are disjunctive and permission-filtered; `ancestors` facet values are truncated like `Item.ancestors`. `relatedItem` the caller cannot see → PERMISSION_DENIED (403), whether or not it exists; same for unreadable resources named in `filter`, except `name` restrictions (unreadable or missing names are simply absent, as in ListItems). Bad filter → INVALID_ARGUMENT. `ancestors:` follows the canonical tree only; item shortcuts never extend it. A text search returns `interpretation`: query terms mapped to published concepts (labels, diacritic-free forms, `queryExpansion` groups). They boost matching documents and add a recall pass over the documents assigned them (readable, at most 5,000); they never filter — only an explicit `document.concepts` filter does (see `interpretation`). A label several schemes share is read by context (another term of a scheme already in the query; a subject term without a document type prefers the document type), else it is an ambiguity whose options come back as `groups`. A member's `affiliation` boosts documents applying to their program, unit or cohort and leaves out documents explicitly scoped (set by a person, or extracted with high confidence) to other units or programs unless the query names them; recency ranks first when the query's document type is time-sensitive, and superseded documents rank lower.
          */
         post: operations["SearchItems"];
         delete?: never;
@@ -2099,7 +2123,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/topics": {
+    "/api/v1/workspaces/{workspace}/conceptSchemes": {
         parameters: {
             query?: never;
             header?: never;
@@ -2107,23 +2131,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List topics.
-         * @description Non-ACTIVE topics (PROPOSED, REJECTED) are visible only to holders of `topics.accept`; others get PERMISSION_DENIED (403) on Get and they are omitted from List. Filter: `state`, `kind`, `parentTopic`. orderBy: `displayName`, `documentCount`. `view` BASIC (the default) omits the Studio fields `keywords`, `synonyms`, `guidance`, `examples`, `rules`, `evidence` and `inReviewCount`; FULL returns them as GetTopic does.
+         * List concept schemes.
+         * @description Ordered by `position` by default. Filter: `purpose`, `displayName`. orderBy: `position`, `displayName`. Platform templates are listed on `conceptSchemes`. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
          */
-        get: operations["ListTopics"];
+        get: operations["ListConceptSchemes"];
         put?: never;
         /**
-         * Create a topic.
-         * @description Admins create ACTIVE topics; the assistant creates PROPOSED ones. `parentTopic` on a DOMAIN → INVALID_ARGUMENT.
+         * Create a concept scheme.
+         * @description A scheme starts unpublished (`publishedVersion` empty) with an empty working copy. `template` = `conceptSchemes/{template}` forks a platform template: the scheme copies the template's settings and its latest published version into the working copy as DRAFT concepts and groups (deprecated template concepts are not copied), each concept keeping `templateConcept`, and `templateVersion` records the version taken; the fork is published like any scheme. A template that was never published → FAILED_PRECONDITION. `conceptSchemeId` defaults to the template's ID. Without `template`, `conceptSchemeId` is required. Taken ID → ALREADY_EXISTS (409). `requestId` makes retries idempotent.
          */
-        post: operations["CreateTopic"];
+        post: operations["CreateConceptScheme"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/topics/{topic}": {
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2131,27 +2155,115 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a topic.
-         * @description Deleted topics are still returned. Non-ACTIVE topics (PROPOSED, REJECTED) are visible only to holders of `topics.accept`; others get PERMISSION_DENIED (403) on Get and they are omitted from List.
+         * Get a concept scheme.
+         * @description `unpublishedChanges` counts the changes the next publish would record. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
          */
-        get: operations["GetTopic"];
+        get: operations["GetConceptScheme"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a concept scheme.
+         * @description Mutable: `displayName`, `description`, `position`, `cardinality`, `maxDepth`, `assignTopConcepts`, `sectionAssignments`, `llmPolicy`, `autoThreshold`, `reviewThreshold`. `purpose` and `template` are immutable. Settings take effect for classification only when the scheme is published (they are part of the version). An authority scheme has `llmPolicy` NEVER and no thresholds; `reviewThreshold` ≤ `autoThreshold` — else INVALID_ARGUMENT on the field. Stale etag → ABORTED (409).
+         */
+        patch: operations["UpdateConceptScheme"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}:publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish the working copy as a new version.
+         * @description Checks the working copy with the publish validator (blocking invariants I1–I8: one prefLabel per language, labels disjoint within a concept, no broader cycle, related never between an ancestor and a descendant, depth ≤ `maxDepth`, every concept has a `definition` and a `vi` prefLabel, a deprecated concept has no live narrower concept and its replacements are published concepts of the scheme without a replacement cycle) and computes the warnings (W1 an alt/hidden label shared by two concepts of the scheme, W3 top-concept count outside 8–20, W4 a concept rejected by reviewers ≥ 3 times in 90 days without `scopeNote`). In one transaction it then stores the immutable ConceptSchemeVersion (`publishedVersion` + 1: snapshot, `changes` against the previous version, `warnings`, `reclassification`), turns DRAFT concepts PUBLISHED and pending deprecations DEPRECATED, rebuilds the hierarchy closure the filters and facets read, and moves the labels of a concept deprecated with one replacement (merge) to it without calling a model. After commit the reclassification the version records runs on the affected documents only: changed thresholds re-route stored machine confidences and a deprecation without replacement rejects the concept's machine labels (no model); split (rerank among the replacements on the old concept's documents), new narrower concept (rerank among the parent and its children on the parent's documents) and documents a deprecation left without any label of a scheme with `minLabels` ≥ 1 (rerun that scheme) become `CLASSIFY_ONLY` ingestion runs with `trigger` TAXONOMY (at most 1000 documents each). Renames, definition edits, moves, settings and group changes never reclassify, and a first version classifies nothing by itself. Returns an Operation (metadata `PublishConceptSchemeMetadata`, response `ConceptSchemeVersion`) that is already `done`. Any blocking violation → FAILED_PRECONDITION reason TAXONOMY_INVALID (nothing is stored). `validateOnly` stores nothing and returns a `done` Operation that is not kept (GetOperation → NOT_FOUND) whose response is the version the publish would store, with `violations[]` filled; the publish dialog shows exactly what would block. No change since the last version → FAILED_PRECONDITION reason NO_CHANGES. Stale etag → ABORTED (409).
+         */
+        post: operations["PublishConceptScheme"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}:importConcepts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create and update concepts from rows.
+         * @description Rows (ConceptImportRow, parsed from CSV by the client) are matched by `notation` within the scheme (MERGE): an unknown notation creates a DRAFT concept (needs `concepts.create`), a known live concept is updated with the columns the row sets (an empty string clears a column; an absent column keeps it). `broader` and `related` name notations of the same scheme, also ones created by the same import. One transaction: every row applies or none; a row that cannot apply (bad notation, reserved notation of a deleted draft, deprecated concept, unknown broader/related, label or pattern errors, a cycle) → INVALID_ARGUMENT with one field violation per problem (`rows[3].broader`). `validateOnly` reports the same result and stores nothing. Audited as ImportConcepts.
+         */
+        post: operations["ImportConcepts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/concepts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List concepts.
+         * @description The working copy: DRAFT, PUBLISHED and DEPRECATED concepts (deleted drafts with `showDeleted`). Filter: `state`, `broader` (`broader:"…/concepts/x"`: direct narrower concepts; `NOT broader:*`: top concepts), `notation`. orderBy: `notation` (default), `documentCount`. `documentCount` and `inReviewCount` count readable documents only (visibility rule). Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["ListConcepts"];
+        put?: never;
+        /**
+         * Create a draft concept.
+         * @description Creates a DRAFT concept in the working copy; it is used for classification once the scheme is published. `conceptId` is the notation (`^[a-z][a-z0-9-]{0,62}$`), immutable and never reused in the scheme (also not the notation of a deprecated or deleted concept → ALREADY_EXISTS 409). Labels are normalized (NFC, case and spacing folded, diacritics kept); an empty label, two prefLabels in one language or a label repeated in one language → INVALID_ARGUMENT on that label (`altLabels[1].text`). `broader`/`related` name concepts of the same scheme that are not deprecated; a broader cycle → INVALID_ARGUMENT on `broader`. `color` only on a concept without `broader`. `matchPatterns` must be valid RE2-compatible patterns (≤ 200 characters, no look-around or back-references) → else INVALID_ARGUMENT.
+         */
+        post: operations["CreateConcept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/concepts/{concept}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a concept.
+         * @description Deleted drafts are still returned. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["GetConcept"];
         put?: never;
         post?: never;
         /**
-         * Soft-delete a topic.
-         * @description Only when no item or contribution uses it → else FAILED_PRECONDITION. Stale etag → ABORTED (409).
+         * Delete a draft concept.
+         * @description Only a DRAFT concept that was never published (else FAILED_PRECONDITION: deprecate it instead) and that no other concept names in `broader`/`related`, no group holds and no rule uses (else FAILED_PRECONDITION). The concept is tombstoned and returned; its notation stays reserved. Stale etag → ABORTED (409).
          */
-        delete: operations["DeleteTopic"];
+        delete: operations["DeleteConcept"];
         options?: never;
         head?: never;
         /**
-         * Update a topic.
-         * @description Stale etag → ABORTED (409).
+         * Update a concept in the working copy.
+         * @description Mutable: `prefLabels`, `altLabels`, `hiddenLabels`, `definition`, `scopeNote`, `examples`, `broader`, `related`, `mappings`, `matchPatterns`, `timeSensitive`, `color`, `icon` (repeated fields are replaced whole); validation as CreateConcept. A DEPRECATED or deleted concept → FAILED_PRECONDITION. Changes reach classification and query mapping at the next publish; a concept's current labels show at once wherever people read them. Stale etag → ABORTED (409).
          */
-        patch: operations["UpdateTopic"];
+        patch: operations["UpdateConcept"];
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/topics/{topic}:accept": {
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/concepts/{concept}:deprecate": {
         parameters: {
             query?: never;
             header?: never;
@@ -2161,17 +2273,149 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Accept a proposed topic.
-         * @description PROPOSED → ACTIVE; tags the contributions that proposed it. Other states → FAILED_PRECONDITION. Stale etag → ABORTED (409).
+         * Deprecate a published concept.
+         * @description Marks a PUBLISHED concept for deprecation at the next publish (`deprecationPending`); `replacedBy` (concepts of the same scheme, published or draft by then) with one concept is a merge (its labels move to the replacement at publish, no model call), with several a split (the old concept's documents are reranked among them). Calling it again replaces the pending `replacedBy`. A concept with a live narrower concept, a DRAFT or DEPRECATED concept, or a replacement that is the concept itself or deprecated → FAILED_PRECONDITION / INVALID_ARGUMENT on `replacedBy`. Stale etag → ABORTED (409).
          */
-        post: operations["AcceptTopic"];
+        post: operations["DeprecateConcept"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/topics/{topic}:merge": {
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List concept groups.
+         * @description Ordered by `position`. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["ListConceptGroups"];
+        put?: never;
+        /**
+         * Create a concept group.
+         * @description A display grouping of concepts (skos:Collection), never a classification target. `members` are concepts of the scheme, in display order. `queryExpansion` makes the members interchangeable in query mapping (a question naming one matches all). Part of the next published version. `groupId` follows `^[a-z][a-z0-9-]{0,62}$`; taken → ALREADY_EXISTS (409).
+         */
+        post: operations["CreateConceptGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/groups/{group}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a concept group.
+         * @description Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["GetConceptGroup"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a concept group.
+         * @description Removed from the working copy; published versions keep it. Stale etag → ABORTED (409).
+         */
+        delete: operations["DeleteConceptGroup"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a concept group.
+         * @description Mutable: `displayName`, `position`, `members`, `queryExpansion`. Stale etag → ABORTED (409).
+         */
+        patch: operations["UpdateConceptGroup"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List published versions.
+         * @description Newest first. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["ListConceptSchemeVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a published version.
+         * @description Immutable except `reclassification.state` and `reclassification.runs`. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["GetConceptSchemeVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/versions/{version}:export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a version as SKOS.
+         * @description The version's snapshot as SKOS: a `skos:ConceptScheme`, its `skos:Concept`s with `skos:inScheme`, `skos:topConceptOf`, `skos:notation`, `skos:prefLabel`/`altLabel`/`hiddenLabel` with language tags, `skos:definition`, `skos:scopeNote`, `skos:example`, `skos:broader`/`narrower`/`related`, `skos:exactMatch`/`closeMatch`/`broadMatch`/`narrowMatch`, `dct:isReplacedBy` and `owl:deprecated` for deprecated concepts, and `skos:Collection` with `skos:member` for groups. Concept IRIs are the resource names under the API base URL. `format` TURTLE (default) or JSON_LD. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["ExportConceptSchemeVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}:diffTemplate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare a fork with its template.
+         * @description Three-way comparison of a forked scheme: the template version the fork last took (`templateVersion`), the template's latest published version and the fork's working copy. Each template change since the taken version is one TemplateChange (a new concept, a changed field of a concept or of the scheme settings, a deprecation); it is a `conflict` when the fork changed the same field (or holds the new concept's notation) itself. Nothing is changed. A scheme that is not a fork → FAILED_PRECONDITION. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["DiffConceptSchemeTemplate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}:applyTemplateChanges": {
         parameters: {
             query?: never;
             header?: never;
@@ -2181,17 +2425,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Merge a topic into another.
-         * @description Retags items (`document.topics`) and contributions to `targetTopic`, then soft-deletes this topic (returned). Target same, deleted or of another kind → FAILED_PRECONDITION. Stale etag → ABORTED (409).
+         * Apply selected template changes.
+         * @description Applies the selected TemplateChanges (by `key`, from DiffConceptSchemeTemplate) to the working copy in one transaction, then records the template's latest version as `templateVersion`: changes not selected are declined. The system never overwrites the fork's own edits: a selected change that is a `conflict`, or a key that is not in the current diff → FAILED_PRECONDITION / INVALID_ARGUMENT on `changes`. New concepts arrive as DRAFT with `templateConcept`. Takes effect at the next publish. Stale etag → ABORTED (409).
          */
-        post: operations["MergeTopic"];
+        post: operations["ApplyConceptSchemeTemplateChanges"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/topics/{topic}:reject": {
+    "/api/v1/workspaces/{workspace}/conceptSchemes:testClassification": {
         parameters: {
             query?: never;
             header?: never;
@@ -2201,97 +2445,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Reject a proposed topic.
-         * @description PROPOSED → REJECTED. Other states → FAILED_PRECONDITION. Stale etag → ABORTED (409). `topics.reject` is held by the same roles as `topics.accept`.
+         * Classify a sample document.
+         * @description Runs the CLASSIFYING step of processing (`document_contract.md` "Processing") on a sample against the published schemes and the rules in effect: metadata extraction, rules, candidates per scheme and — when a scheme is not settled by rules — one call to the configured contextualization model. Returns the assignments with their outcome per scheme, the ranked candidates with their signals, the extracted issuance and applicability, and the summary. Nothing is stored. A scheme needing the model without a configured contextualization model → FAILED_PRECONDITION.
          */
-        post: operations["RejectTopic"];
+        post: operations["TestClassification"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/topics/{topic}:undelete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore a deleted topic.
-         * @description Not deleted → ALREADY_EXISTS (409).
-         */
-        post: operations["UndeleteTopic"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace}/topics/{topic}:confirmAssignments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Confirm the assistant's assignments of a topic.
-         * @description Turns the assistant-applied assignments of this topic (`document.assistantTopics`) on the documents matching `filter` into assignments by the caller, in one statement; nothing else changes. Any workspace member may call it: `filter` is the ListItems document filter and silently narrows to documents the caller can see and holds `items.update` on (their governing collection), so a caller who edits nothing confirms 0. Only this exact topic is confirmed, not the topics under a DOMAIN. An unknown topic → NOT_FOUND; a non-ACTIVE topic answers as GetTopic does (PERMISSION_DENIED without `topics.accept`, else FAILED_PRECONDITION). Returns how many assignments were confirmed.
-         */
-        post: operations["ConfirmTopicAssignments"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace}/topics:import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Import topics from rows.
-         * @description Creates and updates topics from spreadsheet rows the client parsed (CSV/XLSX parsing and export stay in the client; export is ListTopics). One transaction: either every applicable row is applied or none (`validateOnly` reports the same result and applies nothing). Rows name domains and topics by display name (TopicImportRow); topic IDs are generated by the server and never need to be authored. A row that cannot apply (no domain, a topic name used twice in one domain in the file, a name that matches more than one existing topic, an unknown `name`, keywords on a domain row) is skipped with its reason, never fails the import. Creating topics also needs `topics.create` and archiving (REPLACE) `topics.delete`, else PERMISSION_DENIED (403).
-         */
-        post: operations["ImportTopics"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace}/topics:testClassification": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Classify a sample document against the topics.
-         * @description Runs the CLASSIFYING step of processing on a sample, with optional unsaved changes to topics: the rules first (a matching rule settles the topics and the model is not called), else one call to the configured contextualization model with the `document_profile` prompt. Nothing is stored. Without rule hits and without a configured contextualization model → FAILED_PRECONDITION (400).
-         */
-        post: operations["TestTopicClassification"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace}/topics:compileClassificationPrompt": {
+    "/api/v1/workspaces/{workspace}/conceptSchemes:compileClassificationPrompt": {
         parameters: {
             query?: never;
             header?: never;
@@ -2300,9 +2464,9 @@ export interface paths {
         };
         /**
          * Show the classification prompt processing sends.
-         * @description The `document_profile` prompt compiled with every ACTIVE topic as a candidate (a run's `classification` narrows them) and placeholders for the run note, keyword matches, title and document, plus the rules checked before it. The prompt is the prefix every document of a run shares (instructions, note, the taxonomy grouped by domain with `T1..Tn` labels; providers cache it), then one document's part. Topic IDs are not in it. No model is called.
+         * @description The classification prompt compiled from every published scheme: the prefix every document of a run shares (instructions, the schemes with their candidate labels; providers cache it), then one document's part with placeholders (settled facets, candidates with scores, metadata request, title, excerpt), plus the concept rules checked before it. Concept IDs are not in it. No model is called. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
          */
-        get: operations["CompileTopicClassificationPrompt"];
+        get: operations["CompileClassificationPrompt"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2311,44 +2475,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspaces/{workspace}/topicCorrections": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List classification corrections.
-         * @description Newest first. Filter: `state`, `toTopics:"workspaces/{workspace}/topics/{topic}"`.
-         */
-        get: operations["ListTopicCorrections"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace}/topicCorrections/{topicCorrection}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a classification correction. */
-        get: operations["GetTopicCorrection"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/workspaces/{workspace}/topicCorrections/{topicCorrection}:dismiss": {
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/concepts/{concept}:confirmAssignments": {
         parameters: {
             query?: never;
             header?: never;
@@ -2358,10 +2485,451 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Dismiss a classification correction.
-         * @description OPEN → DISMISSED; already DISMISSED returns it unchanged.
+         * Confirm the suggested assignments of a concept.
+         * @description Any workspace member may call it. Turns the SUGGESTED assignments of this exact concept on the documents matching `filter` (the ListItems document filter; empty = every document) into ACCEPTED ones reviewed by the caller, in one statement; source and confidence are kept. The filter silently narrows to readable documents whose governing collection grants the caller `items.update`, so a caller who edits nothing confirms 0. A document already at the scheme's `cardinality.max` accepted labels is skipped and not counted; the confirmed label becomes primary when the scheme has a primary and the document has none. Returns `confirmedCount`.
          */
-        post: operations["DismissTopicCorrection"];
+        post: operations["ConfirmConceptAssignments"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptSchemes/{conceptScheme}/concepts/{concept}:rejectAssignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject the machine assignments of a concept.
+         * @description Any workspace member may call it. Turns the SUGGESTED and ACCEPTED machine assignments (source other than HUMAN) of this exact concept on the documents matching `filter` into REJECTED ones reviewed by the caller, in one statement. Same narrowing as ConfirmConceptAssignments. Returns `rejectedCount`.
+         */
+        post: operations["RejectConceptAssignments"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List platform template concept schemes.
+         * @description Ordered by `position` by default. Filter: `purpose`, `displayName`. orderBy: `position`, `displayName`. On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["ListTemplateConceptSchemes"];
+        put?: never;
+        /**
+         * Create a platform template concept scheme.
+         * @description A scheme starts unpublished (`publishedVersion` empty) with an empty working copy. Templates never fork another template (`template` set → INVALID_ARGUMENT). `conceptSchemeId` is required. Taken ID → ALREADY_EXISTS (409). `requestId` makes retries idempotent. On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        post: operations["CreateTemplateConceptScheme"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a platform template concept scheme.
+         * @description `unpublishedChanges` counts the changes the next publish would record. On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["GetTemplateConceptScheme"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a platform template concept scheme.
+         * @description Mutable: `displayName`, `description`, `position`, `cardinality`, `maxDepth`, `assignTopConcepts`, `sectionAssignments`, `llmPolicy`, `autoThreshold`, `reviewThreshold`. `purpose` and `template` are immutable. Settings take effect for classification only when the scheme is published (they are part of the version). An authority scheme has `llmPolicy` NEVER and no thresholds; `reviewThreshold` ≤ `autoThreshold` — else INVALID_ARGUMENT on the field. Stale etag → ABORTED (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        patch: operations["UpdateTemplateConceptScheme"];
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}:publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a platform template as a new version.
+         * @description Checks the working copy with the publish validator (blocking invariants I1–I8: one prefLabel per language, labels disjoint within a concept, no broader cycle, related never between an ancestor and a descendant, depth ≤ `maxDepth`, every concept has a `definition` and a `vi` prefLabel, a deprecated concept has no live narrower concept and its replacements are published concepts of the scheme without a replacement cycle) and computes the warnings (W1 an alt/hidden label shared by two concepts of the scheme, W3 top-concept count outside 8–20, W4 a concept rejected by reviewers ≥ 3 times in 90 days without `scopeNote`). In one transaction it then stores the immutable ConceptSchemeVersion (`publishedVersion` + 1: snapshot, `changes` against the previous version, `warnings`, `reclassification`), turns DRAFT concepts PUBLISHED and pending deprecations DEPRECATED, rebuilds the hierarchy closure the filters and facets read, and moves the labels of a concept deprecated with one replacement (merge) to it without calling a model. Templates are never classified: no reclassification. Forks take the new version through DiffConceptSchemeTemplate. Returns an Operation (metadata `PublishConceptSchemeMetadata`, response `ConceptSchemeVersion`) that is already `done`. Any blocking violation → FAILED_PRECONDITION reason TAXONOMY_INVALID (nothing is stored). `validateOnly` stores nothing and returns a `done` Operation that is not kept (GetOperation → NOT_FOUND) whose response is the version the publish would store, with `violations[]` filled; the publish dialog shows exactly what would block. No change since the last version → FAILED_PRECONDITION reason NO_CHANGES. Stale etag → ABORTED (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        post: operations["PublishTemplateConceptScheme"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}:importConcepts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create and update concepts from rows.
+         * @description Rows (ConceptImportRow, parsed from CSV by the client) are matched by `notation` within the scheme (MERGE): an unknown notation creates a DRAFT concept (needs `concepts.create`), a known live concept is updated with the columns the row sets (an empty string clears a column; an absent column keeps it). `broader` and `related` name notations of the same scheme, also ones created by the same import. One transaction: every row applies or none; a row that cannot apply (bad notation, reserved notation of a deleted draft, deprecated concept, unknown broader/related, label or pattern errors, a cycle) → INVALID_ARGUMENT with one field violation per problem (`rows[3].broader`). `validateOnly` reports the same result and stores nothing. Audited as ImportConcepts. On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        post: operations["ImportTemplateConcepts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/concepts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List concepts.
+         * @description The working copy: DRAFT, PUBLISHED and DEPRECATED concepts (deleted drafts with `showDeleted`). Filter: `state`, `broader` (`broader:"…/concepts/x"`: direct narrower concepts; `NOT broader:*`: top concepts), `notation`. orderBy: `notation` (default), `documentCount`. `documentCount` and `inReviewCount` count readable documents only (visibility rule). On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["ListTemplateConcepts"];
+        put?: never;
+        /**
+         * Create a draft concept.
+         * @description Creates a DRAFT concept in the working copy; it is used for classification once the scheme is published. `conceptId` is the notation (`^[a-z][a-z0-9-]{0,62}$`), immutable and never reused in the scheme (also not the notation of a deprecated or deleted concept → ALREADY_EXISTS 409). Labels are normalized (NFC, case and spacing folded, diacritics kept); an empty label, two prefLabels in one language or a label repeated in one language → INVALID_ARGUMENT on that label (`altLabels[1].text`). `broader`/`related` name concepts of the same scheme that are not deprecated; a broader cycle → INVALID_ARGUMENT on `broader`. `color` only on a concept without `broader`. `matchPatterns` must be valid RE2-compatible patterns (≤ 200 characters, no look-around or back-references) → else INVALID_ARGUMENT. On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        post: operations["CreateTemplateConcept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/concepts/{concept}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a concept.
+         * @description Deleted drafts are still returned. On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["GetTemplateConcept"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a draft concept.
+         * @description Only a DRAFT concept that was never published (else FAILED_PRECONDITION: deprecate it instead) and that no other concept names in `broader`/`related`, no group holds and no rule uses (else FAILED_PRECONDITION). The concept is tombstoned and returned; its notation stays reserved. Stale etag → ABORTED (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        delete: operations["DeleteTemplateConcept"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a concept in the working copy.
+         * @description Mutable: `prefLabels`, `altLabels`, `hiddenLabels`, `definition`, `scopeNote`, `examples`, `broader`, `related`, `mappings`, `matchPatterns`, `timeSensitive`, `color`, `icon` (repeated fields are replaced whole); validation as CreateConcept. A DEPRECATED or deleted concept → FAILED_PRECONDITION. Changes reach classification and query mapping at the next publish; a concept's current labels show at once wherever people read them. Stale etag → ABORTED (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        patch: operations["UpdateTemplateConcept"];
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/concepts/{concept}:deprecate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deprecate a published concept.
+         * @description Marks a PUBLISHED concept for deprecation at the next publish (`deprecationPending`); `replacedBy` (concepts of the same scheme, published or draft by then) with one concept is a merge (its labels move to the replacement at publish, no model call), with several a split (the old concept's documents are reranked among them). Calling it again replaces the pending `replacedBy`. A concept with a live narrower concept, a DRAFT or DEPRECATED concept, or a replacement that is the concept itself or deprecated → FAILED_PRECONDITION / INVALID_ARGUMENT on `replacedBy`. Stale etag → ABORTED (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        post: operations["DeprecateTemplateConcept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List concept groups.
+         * @description Ordered by `position`. On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["ListTemplateConceptGroups"];
+        put?: never;
+        /**
+         * Create a concept group.
+         * @description A display grouping of concepts (skos:Collection), never a classification target. `members` are concepts of the scheme, in display order. `queryExpansion` makes the members interchangeable in query mapping (a question naming one matches all). Part of the next published version. `groupId` follows `^[a-z][a-z0-9-]{0,62}$`; taken → ALREADY_EXISTS (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        post: operations["CreateTemplateConceptGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/groups/{group}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a concept group.
+         * @description On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["GetTemplateConceptGroup"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a concept group.
+         * @description Removed from the working copy; published versions keep it. Stale etag → ABORTED (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        delete: operations["DeleteTemplateConceptGroup"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a concept group.
+         * @description Mutable: `displayName`, `position`, `members`, `queryExpansion`. Stale etag → ABORTED (409). On a platform template (`conceptSchemes/{conceptScheme}`). Platform templates are changed only with the permission on the platform.
+         */
+        patch: operations["UpdateTemplateConceptGroup"];
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List published versions.
+         * @description Newest first. On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["ListTemplateConceptSchemeVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a published version.
+         * @description Immutable except `reclassification.state` and `reclassification.runs`. On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["GetTemplateConceptSchemeVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conceptSchemes/{conceptScheme}/versions/{version}:export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a version as SKOS.
+         * @description The version's snapshot as SKOS: a `skos:ConceptScheme`, its `skos:Concept`s with `skos:inScheme`, `skos:topConceptOf`, `skos:notation`, `skos:prefLabel`/`altLabel`/`hiddenLabel` with language tags, `skos:definition`, `skos:scopeNote`, `skos:example`, `skos:broader`/`narrower`/`related`, `skos:exactMatch`/`closeMatch`/`broadMatch`/`narrowMatch`, `dct:isReplacedBy` and `owl:deprecated` for deprecated concepts, and `skos:Collection` with `skos:member` for groups. Concept IRIs are the resource names under the API base URL. `format` TURTLE (default) or JSON_LD. On a platform template. Platform templates (`conceptSchemes/…`) are readable by platform callers holding the permission on the platform and by members holding it in any workspace (to fork them); workspace schemes only by that workspace's members (platform callers never read a workspace's taxonomy).
+         */
+        get: operations["ExportTemplateConceptSchemeVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptRules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List concept rules.
+         * @description Filter: `effect`, `then`, `when.concept`, `when.collection`, `when.source`. orderBy: `createTime`, `name`.
+         */
+        get: operations["ListConceptRules"];
+        put?: never;
+        /**
+         * Create a concept rule.
+         * @description When the condition holds for a document (`when.concept`: the document carries that concept, or its issuer/applicability names that authority concept; `when.collection`: the document is in that collection's subtree; `when.source`: it came from that source), the rule implies (IMPLIES: settles the concept, no model for it; `then` must be an assignable concept of a classification scheme) or favors (PRIOR with `weight`: a weighted candidate spread over `then` and its published narrower concepts) the concept `then`. Exactly one `when` field. `conceptRuleId` follows `^[a-z][a-z0-9-]{0,62}$`; taken → ALREADY_EXISTS (409). Rules are not versioned: a change is audited and, after commit, re-evaluates the rule-derived assignments of every document the old or the new condition matches (no model call).
+         */
+        post: operations["CreateConceptRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptRules/{conceptRule}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a concept rule. */
+        get: operations["GetConceptRule"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a concept rule.
+         * @description Soft-deletes the rule (its ID may be reused). Stale etag → ABORTED (409). Rules are not versioned: a change is audited and, after commit, re-evaluates the rule-derived assignments of every document the old or the new condition matches (no model call).
+         */
+        delete: operations["DeleteConceptRule"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a concept rule.
+         * @description Mutable: `when`, `then`, `effect`, `weight`. Stale etag → ABORTED (409). Rules are not versioned: a change is audited and, after commit, re-evaluates the rule-derived assignments of every document the old or the new condition matches (no model call).
+         */
+        patch: operations["UpdateConceptRule"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptProposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List concept proposals.
+         * @description Newest first. Filter: `state`, `scheme`, `kind`, `origin`. Proposals come from clustering the unclassified pool, from reviewers' repeated corrections and from members; the classifier never creates concepts.
+         */
+        get: operations["ListConceptProposals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptProposals/{conceptProposal}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a concept proposal.
+         * @description `evidence` lists only the documents the caller can read.
+         */
+        get: operations["GetConceptProposal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptProposals/{conceptProposal}:accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a concept proposal.
+         * @description OPEN → ACCEPTED. NEW_CONCEPT creates a DRAFT concept (CreateConcept rules; `conceptId` required; `concept` fields override the proposal's name, definition and suggested broader concept) and records it in `concept`; LABEL adds the proposed text as an alt (or hidden) label of `targetConcept` in the working copy. Both reach classification at the next publish. Other states → FAILED_PRECONDITION.
+         */
+        post: operations["AcceptConceptProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/conceptProposals/{conceptProposal}:reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a concept proposal.
+         * @description OPEN → REJECTED. Other states → FAILED_PRECONDITION.
+         */
+        post: operations["RejectConceptProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace}/sharedLabels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List labels shared by several concepts.
+         * @description Normalized labels held by more than one concept of the workspace's published schemes (W2: across schemes — valid, queries resolve them by context) and labels of the working copy shared by two concepts of one scheme (W1: a warning the publish dialog also shows). Filter: `crossScheme` (`crossScheme = true` lists only labels shared across schemes), `scheme` (labels touching that scheme). Ordered by label. Workspace taxonomy is workspace content: a platform grant does not reach it (platform callers read the templates `conceptSchemes/…` instead).
+         */
+        get: operations["ListSharedLabels"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2643,7 +3211,7 @@ export interface paths {
         put?: never;
         /**
          * Start processing documents.
-         * @description Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. "Select all matching" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current the chosen topics and the classification's summary and title replace the contribution's `suggestions.topics`, `suggestions.summary` and `suggestions.title` (confidences cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` sets which topics the run's CLASSIFYING step may assign and a note it reads with each document. `readImages` has the configured vision model read the text inside the documents' pictures; without a configured vision model it is FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. The platform console retries failed work with `selector.filter: "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
+         * @description Processes the documents chosen by `selector`: explicit `items[]` (≤1000) and/or `filter`, the AIP-160 document filter of ListItems; both set = intersection. "Select all matching" sends the filter the list shows. The selection is resolved once into the run's tasks at creation (snapshot). Selection rules: only explicit `items[]` entries are checked one by one (each needs `ingestionRuns.create` on its governing collection — or, for the candidate of an open NEW_DOCUMENT contribution, `contributions.review` on its deciding collection, so a reviewer processes a submission before deciding it; an unrunnable or unreadable one is PERMISSION_DENIED 403). `filter` silently intersects with the collections where the caller holds `ingestionRuns.create`; an item it names (`ancestors:`, `parentItem`) that the caller cannot read is PERMISSION_DENIED 403; a malformed filter or an unknown field is INVALID_ARGUMENT. Never selected: collections, conversation attachments, assistant artifacts, UNSUPPORTED documents (`indexingState`), documents whose `contentState` is not AVAILABLE, documents queued or running in another active run, and — unless `items[]` or an item the filter names selects them — documents in PERSONAL collections. UNPUBLISHED documents may be processed; retrieval still hides them. A run never publishes. Processing the candidate of an open NEW_DOCUMENT contribution: its CLASSIFYING rules match the contribution's target collection (else the suggested one) instead of the contributor's PERSONAL collection, and when its index is recorded current its concept assignments are the candidate's `document.concepts` and the classification's summary and title replace the contribution's `suggestions.summary` and `suggestions.title` (confidence cleared), which the reviewer then confirms or corrects in ApproveContribution. `classification` narrows the candidate concepts of the CLASSIFYING step and adds a note it reads with each document; `classifyOnly` classifies again from the stored Structured Document and chunks (no re-parse, no re-embedding). `readImages` has the configured vision model read the text inside the documents' pictures; without a configured vision model it is FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. The platform console retries failed work with `selector.filter: "document.indexingState = FAILED"` and `trigger: PLATFORM_RETRY` (`ingestionRuns.create` granted by `platformOperator`). The body uses the `IngestionRun` schema; a create without `selector`, or with an empty selector, is INVALID_ARGUMENT (400). `requestId` makes retries idempotent. A selector that matches no document creates an empty run that is immediately SUCCEEDED with zero tasks.
          */
         post: operations["CreateIngestionRun"];
         delete?: never;
@@ -3095,7 +3663,7 @@ export interface paths {
         put?: never;
         /**
          * Ask the assistant to revise.
-         * @description Assistant writes a new revision of a text artifact (Markdown or plain text, rewritten by the model), or regenerates the named evidence-review `cells`. A file the sandbox made (a spreadsheet, a Word document, slides) is revised by a turn of its conversation instead (ConverseConversation `editArtifact`); revising it here is FAILED_PRECONDITION. Returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). While GENERATING it is FAILED_PRECONDITION (400). A revision whose content maps to another file class than the artifact's current revision fails the operation with INVALID_ARGUMENT reason ITEM_TYPE_MISMATCH. A stale `etag` is 409 ABORTED.
+         * @description Assistant writes a new revision of a Work artifact (a draft, a study guide or quiz rewritten as text), or regenerates the named evidence-review `cells`. A file of a conversation (kind FILE, whatever its format) is changed by a turn of that conversation (ConverseConversation `editArtifact`), not here: revising a FILE is FAILED_PRECONDITION. Returns an Operation (`metadata` @type `ArtifactOperationMetadata`, `response` @type `Artifact`). While GENERATING it is FAILED_PRECONDITION (400). A revision whose content maps to another file class than the artifact's current revision fails the operation with INVALID_ARGUMENT reason ITEM_TYPE_MISMATCH. A stale `etag` is 409 ABORTED.
          */
         post: operations["ReviseArtifact"];
         delete?: never;
@@ -4287,7 +4855,7 @@ export interface components {
          */
         ItemKind: "COLLECTION" | "DOCUMENT";
         /**
-         * @description Classification scoped by `itemKind`; set by the server and immutable. COLLECTION: STANDARD (created by clients) or PERSONAL (a member's "My files", created by the server). DOCUMENT: the file class of its content, derived from the validated MIME type and file name — PDF (application/pdf), WORD (DOCX, DOC), PRESENTATION (PPTX, PPT), SPREADSHEET (XLSX, XLS, CSV, TSV), MARKDOWN (MD, Markdown, RST), HTML (HTML, HTM), PLAIN_TEXT (TXT, LOG, SQL and other text/*), DATA (JSON, JSONL, XML, YAML), IMAGE (image/*), AUDIO (audio/*), VIDEO (video/*), ARCHIVE (ZIP), OTHER (anything else). Every revision of a document has the same file class; content of another class is refused with reason ITEM_TYPE_MISMATCH. Not a business taxonomy (use topics).
+         * @description Classification scoped by `itemKind`; set by the server and immutable. COLLECTION: STANDARD (created by clients) or PERSONAL (a member's "My files", created by the server). DOCUMENT: the file class of its content, derived from the validated MIME type and file name — PDF (application/pdf), WORD (DOCX, DOC), PRESENTATION (PPTX, PPT), SPREADSHEET (XLSX, XLS, CSV, TSV), MARKDOWN (MD, Markdown, RST), HTML (HTML, HTM), PLAIN_TEXT (TXT, LOG, SQL and other text/*), DATA (JSON, JSONL, XML, YAML), IMAGE (image/*), AUDIO (audio/*), VIDEO (video/*), ARCHIVE (ZIP), OTHER (anything else). Every revision of a document has the same file class; content of another class is refused with reason ITEM_TYPE_MISMATCH. Not a business taxonomy (use concept schemes).
          * @enum {string}
          */
         ItemType: "STANDARD" | "PERSONAL" | "PDF" | "WORD" | "PRESENTATION" | "SPREADSHEET" | "MARKDOWN" | "HTML" | "PLAIN_TEXT" | "DATA" | "IMAGE" | "AUDIO" | "VIDEO" | "ARCHIVE" | "OTHER";
@@ -4849,6 +5417,7 @@ export interface components {
              * @description Last activity.
              */
             readonly lastActiveTime?: string;
+            affiliation?: components["schemas"]["MemberAffiliation"];
         };
         ListMembersResponse: {
             members?: components["schemas"]["Member"][];
@@ -5185,37 +5754,13 @@ export interface components {
             item?: components["schemas"]["MemberHomeItem"];
             readonly reason?: {
                 /**
-                 * @description Why it was picked. STARTER_PROMPT = the document that best answers one of the member's starter prompts; BECAUSE_YOU_READ = shares a topic with what the member read lately; FROM_YOUR_SPACE = among the materials of a space the member belongs to; SAVED_TOPIC = in a topic of the member's saved items; POPULAR = most read in the domains the other reasons point to (the whole workspace when there are none).
+                 * @description Why it was picked. STARTER_PROMPT = the document that best answers one of the member's starter prompts; BECAUSE_YOU_READ = shares a concept with what the member read lately; FROM_YOUR_SPACE = among the materials of a space the member belongs to; SAVED_CONCEPT = assigned a concept of the member's saved items; POPULAR = most read under the top concepts the other reasons point to (the whole workspace when there are none).
                  * @enum {string}
                  */
-                readonly kind?: "STARTER_PROMPT" | "BECAUSE_YOU_READ" | "FROM_YOUR_SPACE" | "SAVED_TOPIC" | "POPULAR";
-                /** @description The reason's subject, for the client to word — the starter prompt's title (STARTER_PROMPT), the topic's name (BECAUSE_YOU_READ, SAVED_TOPIC), the space's name (FROM_YOUR_SPACE); empty for POPULAR. */
+                readonly kind?: "STARTER_PROMPT" | "BECAUSE_YOU_READ" | "FROM_YOUR_SPACE" | "SAVED_CONCEPT" | "POPULAR";
+                /** @description The reason's subject, for the client to word — the starter prompt's title (STARTER_PROMPT), the concept's displayName (BECAUSE_YOU_READ, SAVED_CONCEPT), the space's name (FROM_YOUR_SPACE); empty for POPULAR. */
                 readonly label?: string;
             };
-        };
-        MemberHomeTopicDomain: {
-            /** @description workspaces/{workspace}/topics/{topic} */
-            readonly topic?: string;
-            readonly displayName?: string;
-            readonly description?: string;
-            /** @description The topic's icon name (as on Topic). */
-            readonly icon?: string;
-            /** @description The topic's colour, */
-            readonly color?: string;
-            /** Format: int32 */
-            readonly documentCount?: number;
-            /**
-             * Format: int32
-             * @description Readable published documents in the domain whose content changed in the last 30 days.
-             */
-            readonly newDocumentCount?: number;
-            readonly topTopics?: {
-                /** @description workspaces/{workspace}/topics/{topic} */
-                readonly topic?: string;
-                readonly displayName?: string;
-                /** Format: int32 */
-                readonly documentCount?: number;
-            }[];
         };
         /** @description A root collection on Home, including discoverable LOCKED ones. LOCKED entries carry only collection, displayName, description, access and ownerSummary. */
         MemberHomeCollection: {
@@ -5253,8 +5798,6 @@ export interface components {
                 /** Format: int32 */
                 readonly collectionCount?: number;
                 /** Format: int32 */
-                readonly topicCount?: number;
-                /** Format: int32 */
                 readonly savedItemCount?: number;
                 /**
                  * Format: int32
@@ -5271,7 +5814,8 @@ export interface components {
                 /** @description The question the suggestion fills in. */
                 readonly prompt?: string;
             }[];
-            readonly topicDomains?: components["schemas"]["MemberHomeTopicDomain"][];
+            /** @description Published top concepts of the lowest-position published classification scheme that hold a document the caller can read (an accepted assignment of it or of a concept under it, each document once), most documents first, at most 8; each with at most 3 non-empty direct narrower concepts (`topConcepts`), most documents first. Colours are inherited from the top concept. */
+            readonly featuredConcepts?: components["schemas"]["MemberHomeFeaturedConcept"][];
             readonly collections?: components["schemas"]["MemberHomeCollection"][];
             readonly featured?: components["schemas"]["MemberHomeFeaturedItem"][];
             readonly recentlyPublished?: components["schemas"]["MemberHomeItem"][];
@@ -5414,10 +5958,10 @@ export interface components {
              * @enum {string}
              */
             purpose: "KNOWLEDGE" | "CONVERSATION_ATTACHMENT";
-            /** @description Topic names; a person's topics and the assistant's (see `assistantTopics`). */
-            topics?: string[];
-            /** @description The subset of `topics` the assistant applied when the document was processed (CLASSIFYING) and no person has set or confirmed; UpdateItem `document.topics` and ConfirmTopicAssignments make them a person's. */
-            readonly assistantTopics?: string[];
+            /** @description Concept assignments per scheme (SUGGESTED and ACCEPTED; REJECTED ones are omitted). UpdateItem `document.concepts` sets the whole-document set: listed concepts become ACCEPTED assignments reviewed by the caller (a machine assignment keeps its `source`; a newly added concept gets source HUMAN), unlisted whole-document assignments (suggested or accepted) become REJECTED (`state` is output only; to leave suggestions pending, do not include `document.concepts` in the mask); section assignments are untouched; at most `cardinality.max` per scheme and exactly one `primary` per scheme with a primary, else INVALID_ARGUMENT on `document.concepts`. */
+            concepts?: components["schemas"]["DocumentConcept"][];
+            issuance?: components["schemas"]["DocumentIssuance"];
+            applicability?: components["schemas"]["DocumentApplicability"];
             summary?: string;
             /** @description BCP-47. */
             languageCode?: string;
@@ -5492,13 +6036,15 @@ export interface components {
             etag?: string;
         };
         SearchItemsFacetSpec: {
-            /** @description Facet field: `ancestors`, `itemType`, `document.topics`, `document.assistantTopics`, `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`, `spaces` (values are space IDs with the space's display name; a document counts once per live space holding it, like the `spaces:` filter), `updateTime` (interval facet: needs `intervals`). `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. `document.topics` is hierarchical like its filter: a DOMAIN counts the documents tagged with it or with any topic under it (each document once). `document.assistantTopics` is the same over the topics the assistant applied that no person has set or confirmed (Studio's Topics to confirm: one facet instead of a count per topic). */
+            /** @description Facet field: `ancestors`, `itemType`, `document.concepts`, `document.suggestedConcepts`, `document.uncertainSchemes` (values are scheme names with the scheme's display name: documents left uncertain in it), `document.owner`, `document.origin.source`, `document.mimeType`, `document.languageCode`, `document.verification.state`, `spaces` (values are space IDs with the space's display name; a document counts once per live space holding it, like the `spaces:` filter), `updateTime` (interval facet: needs `intervals`). `ancestors` values use the same truncation as `Item.ancestors`: Truncation: only collections the caller can read, plus discoverable roots as LOCKED. `document.concepts` (ACCEPTED assignments) and `document.suggestedConcepts` (SUGGESTED ones) are hierarchical like their filters: a concept counts the documents assigned it or any concept under it (each document once); `prefixes` limits the values to the named schemes, one facet per scheme. */
             field: string;
             /**
              * Format: int32
              * @description Max values (default 10); ignored for interval facets.
              */
             limit?: number;
+            /** @description Only for `document.concepts` and `document.suggestedConcepts`: count only concepts of these schemes (Vertex AI Search `FacetKey.prefixes`); empty = every classification scheme. With `excludedFromFilter` the facet ignores only the restrictions naming its own schemes or their concepts. On another field, or naming no scheme of the workspace → INVALID_ARGUMENT on `facetSpecs.prefixes`. */
+            prefixes?: string[];
             /** @description Interval facet buckets (Vertex AI Search `FacetKey.intervals`); required for `updateTime` and refused (INVALID_ARGUMENT) for other fields. Every interval returns one value, in request order, with its bounds in `interval` and its count (0 included); intervals may overlap. */
             intervals?: components["schemas"]["SearchItemsInterval"][];
             /**
@@ -5570,7 +6116,7 @@ export interface components {
             value?: string;
             /** @description The requested interval, for interval facets (instead of `value`). */
             interval?: components["schemas"]["SearchItemsInterval"];
-            /** @description Label of a reference value, so clients need no read per value — a topic's name, a collection's title, an owner's display name (else email; absent once they are no longer a member). */
+            /** @description Label of a reference value, so clients need no read per value — a concept's displayName, a collection's title, an owner's display name (else email; absent once they are no longer a member). */
             displayName?: string;
             /**
              * Format: int32
@@ -5589,6 +6135,7 @@ export interface components {
             /** Format: int32 */
             totalSize?: number;
             nextPageToken?: string;
+            interpretation?: components["schemas"]["SearchItemsInterpretation"];
         };
         UndeleteItemRequest: {
             /** @description Optional; must match the current etag, else ABORTED (409). */
@@ -5847,14 +6394,8 @@ export interface components {
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
         };
-        /** @description Assistant suggestions (output only). Set by the analysis when the contribution opens (topics whose names occur in the title, file name or note, collection); for a NEW_DOCUMENT, `topics`, `summary` and `title` are replaced by the CLASSIFYING step when the candidate is processed (CreateIngestionRun), with `topicsConfidence` and `summaryConfidence` cleared. */
+        /** @description Assistant suggestions (output only). Set by the analysis when the contribution opens (collection); for a NEW_DOCUMENT, `summary` and `title` are replaced by the CLASSIFYING step when the candidate is processed (CreateIngestionRun), with `summaryConfidence` cleared. The suggested concepts are the candidate's own `document.concepts`. */
         ContributionSuggestions: {
-            topics?: string[];
-            /** Format: float */
-            topicsConfidence?: number;
-            proposedTopics?: string[];
-            /** Format: float */
-            proposedTopicsConfidence?: number;
             /** @description Name of a COLLECTION item; only collections the contributor can read that accept contributions. */
             collection?: string;
             /** Format: float */
@@ -5936,12 +6477,11 @@ export interface components {
         ApproveContributionRequest: {
             /** @description Name of a COLLECTION item. Defaults to the contribution's `targetCollection`; required when that is empty (NEW_DOCUMENT/MEMBER). NEW_REVISION: must equal the governing collection of `replacesItem`, else INVALID_ARGUMENT. */
             targetCollection?: string;
-            topics?: string[];
+            /** @description Concepts of classification schemes; they become ACCEPTED HUMAN assignments of the published document (the first of each scheme is primary when the scheme has one) and replace its other whole-document assignments of those schemes. Absent: the published document keeps the candidate's assignments as they are (SUGGESTED ones stay). A malformed or unknown concept → INVALID_ARGUMENT on `concepts`; an unassignable concept, duplicates or more than `cardinality.max` → INVALID_ARGUMENT on `document.concepts`. */
+            concepts?: string[];
             summary?: string;
             /** @description The published document's new `displayName` (usually `suggestions.title`, possibly edited). Omitted keeps the current `displayName`; empty or blank is INVALID_ARGUMENT. `fileName` never changes. */
             title?: string;
-            /** @description Record a TopicCorrection when the approved `topics` differ from the assistant's suggested topics ("Use my change to improve classification"). */
-            recordCorrection?: boolean;
             /** @description The contribution etag the reviewer saw; mismatch (e.g. after a resubmit) → ABORTED (409). */
             etag: string;
         };
@@ -5967,219 +6507,6 @@ export interface components {
             /** @description Optional; must match the current etag, else ABORTED (409). */
             etag?: string;
         };
-        /** @description Taxonomy node. Non-ACTIVE topics (PROPOSED, REJECTED) are visible only to holders of `topics.accept`; others get PERMISSION_DENIED (403) on Get and they are omitted from List. */
-        Topic: {
-            /** @description `workspaces/{workspace}/topics/{topic}`. */
-            readonly name?: string;
-            displayName?: string;
-            description?: string;
-            /** @enum {string} */
-            kind?: "DOMAIN" | "TOPIC";
-            /** @description Parent DOMAIN topic name; TOPIC kind only. */
-            parentTopic?: string;
-            /** @description An icon name; clients offer one shared icon set (e.g. `book`, `flask`, `landmark`). A TOPIC without one shows its domain's icon. A malformed name → INVALID_ARGUMENT (400) on `icon`; empty clears it. */
-            icon?: string;
-            /** @description `#RRGGBB` (case-insensitive; stored lowercase), set on DOMAINs: their topics show the domain colour. A malformed value → INVALID_ARGUMENT (400) on `color`; empty clears it. */
-            color?: string;
-            /** @description Words in a title or text that mean a document belongs here. Classification signal (read by CLASSIFYING); TOPIC kind only. ListTopics view FULL only. */
-            keywords?: string[];
-            /** @description Other names of the topic; they count like keywords. TOPIC kind only. ListTopics view FULL only. */
-            synonyms?: string[];
-            /** @description Free text for the assistant on when to use the topic and what belongs elsewhere. TOPIC kind only. ListTopics view FULL only. */
-            guidance?: string;
-            /** @description Documents that clearly belong here; their titles are shown to the assistant. On reads, only the examples the caller can see. TOPIC kind only. ListTopics view FULL only. */
-            examples?: string[];
-            /** @description A document a rule matches gets the topics of every matching rule and the assistant is not asked (CLASSIFYING). TOPIC kind only. ListTopics view FULL only. */
-            rules?: components["schemas"]["TopicRule"][];
-            /** @enum {string} */
-            readonly state?: "PROPOSED" | "ACTIVE" | "REJECTED" | "DELETED";
-            /** @description Contributions that proposed it, filtered to the caller. ListTopics view FULL only. */
-            readonly evidence?: string[];
-            /**
-             * Format: int32
-             * @description Documents tagged with it that the caller can see (visibility rule). A DOMAIN counts each document tagged with it or with any topic under it once.
-             */
-            readonly documentCount?: number;
-            /**
-             * Format: int32
-             * @description Open contributions proposing or using it; reviewers only. A DOMAIN counts each open contribution using it or any topic under it once. ListTopics view FULL only.
-             */
-            readonly inReviewCount?: number;
-            /** Format: date-time */
-            readonly createTime?: string;
-            /** Format: date-time */
-            readonly updateTime?: string;
-            /** Format: date-time */
-            readonly deleteTime?: string;
-            /** Format: date-time */
-            readonly purgeTime?: string;
-            etag?: string;
-        };
-        ListTopicsResponse: {
-            topics?: components["schemas"]["Topic"][];
-            nextPageToken?: string;
-            /** Format: int32 */
-            totalSize?: number;
-        };
-        UndeleteTopicRequest: {
-            /** @description Optional; must match the current etag, else ABORTED (409). */
-            etag?: string;
-        };
-        AcceptTopicRequest: {
-            /** @description Parent DOMAIN topic name. */
-            parentTopic?: string;
-            displayName?: string;
-            /** @description Optional; must match the current etag, else ABORTED (409). */
-            etag?: string;
-        };
-        RejectTopicRequest: {
-            /** @description Optional; must match the current etag, else ABORTED (409). */
-            etag?: string;
-        };
-        MergeTopicRequest: {
-            /** @description Topic name to keep. */
-            targetTopic: string;
-            /** @description Optional; must match the current etag, else ABORTED (409). */
-            etag?: string;
-        };
-        /** @description Exactly one of `collection` or `source`, else INVALID_ARGUMENT (400). */
-        TopicRule: {
-            /** @description COLLECTION item name; matches documents in its subtree. One the caller cannot see → PERMISSION_DENIED (403), another item type → INVALID_ARGUMENT (400). */
-            collection?: string;
-            /** @description Source name `workspaces/{workspace}/sources/{source}` of a live source, else INVALID_ARGUMENT (400); matches documents that source registered. */
-            source?: string;
-        };
-        ConfirmTopicAssignmentsRequest: {
-            /** @description ListItems filter over documents (empty = every document the caller may edit). */
-            filter?: string;
-        };
-        ConfirmTopicAssignmentsResponse: {
-            /** Format: int32 */
-            readonly confirmedCount?: number;
-        };
-        /** @description One spreadsheet row, named the way people name topics: no codes. `domain` is the domain's display name; a row without `topic` describes that domain, a row with `topic` is a topic in it. Without `name`, a domain is matched by name among ACTIVE domains (case- and space-insensitive) and created when none matches (also when only its topic rows name it); a topic is matched by name among the ACTIVE topics of that domain and created there when none matches. `name` (the resource name, from an export) matches the topic or domain itself, so the row may rename it or move a topic to another domain. New topics get server-generated IDs. An absent field leaves the value unchanged (empty on a new topic); the kind of an existing topic never changes. */
-        TopicImportRow: {
-            /** @description Display name of the domain. */
-            domain: string;
-            /** @description Display name of the topic; empty = the row describes the domain. */
-            topic?: string;
-            /** @description Optional. The topic resource name `workspaces/{workspace}/topics/{topic}` from an export; the row then updates that topic (or domain) instead of matching by display name. Unknown, archived or of the other kind → the row is skipped. */
-            name?: string;
-            description?: string;
-            keywords?: string[];
-            synonyms?: string[];
-            guidance?: string;
-        };
-        ImportTopicsRequest: {
-            rows: components["schemas"]["TopicImportRow"][];
-            /**
-             * @description MERGE adds and updates. REPLACE also archives (soft-deletes) ACTIVE topics and domains no row matched; one still in use is kept.
-             * @default MERGE
-             * @enum {string}
-             */
-            mode: "MERGE" | "REPLACE";
-            /** @description Report what the import would do; change nothing. */
-            validateOnly?: boolean;
-        };
-        TopicImportSkippedRow: {
-            /**
-             * Format: int32
-             * @description 1-based position in `rows`.
-             */
-            row?: number;
-            reason?: string;
-        };
-        /** @description One topic or domain an import creates, updates or archives, named the way the file names it. */
-        TopicImportChange: {
-            /** @description Topic resource name. For a create in `validateOnly` it is provisional (the applied import generates the ID). */
-            topic?: string;
-            /** @enum {string} */
-            kind?: "DOMAIN" | "TOPIC";
-            /** @description The name after the import. */
-            displayName?: string;
-            /** @description Display name of its domain after the import (topics only). */
-            domain?: string;
-            /**
-             * Format: int32
-             * @description 1-based position in `rows` that caused it; absent for archives and for a domain created only because topic rows name it.
-             */
-            row?: number;
-            /** @description What an update changes (updates only). */
-            changes?: ("RENAMED" | "MOVED" | "DESCRIPTION" | "KEYWORDS" | "SYNONYMS" | "GUIDANCE")[];
-            /** @description The name before a rename. */
-            previousDisplayName?: string;
-        };
-        ImportTopicsResponse: {
-            created?: components["schemas"]["TopicImportChange"][];
-            updated?: components["schemas"]["TopicImportChange"][];
-            archived?: components["schemas"]["TopicImportChange"][];
-            /**
-             * Format: int32
-             * @description Rows that changed nothing, plus topics REPLACE kept because they are in use.
-             */
-            unchangedCount?: number;
-            skippedRows?: components["schemas"]["TopicImportSkippedRow"][];
-        };
-        TestTopicClassificationRequest: {
-            title: string;
-            /** @description Sample content, read like a document's leading excerpts. */
-            text?: string;
-            /** @description COLLECTION item name the sample would be in (for collection rules); unreadable → PERMISSION_DENIED (403). */
-            collection?: string;
-            /** @description Source name the sample would come from (for source rules). */
-            source?: string;
-            /** @description Unsaved changes to existing ACTIVE topics, by `name`; their signal fields replace the stored ones for this test only. */
-            topics?: components["schemas"]["Topic"][];
-        };
-        TopicClassificationResult: {
-            /** @description Topic name. */
-            topic?: string;
-            /** @enum {string} */
-            reason?: "RULE" | "ASSISTANT";
-        };
-        TestTopicClassificationResponse: {
-            /** @description Ranked; rule hits first, then the topics the assistant picked in its order. Empty = no topic. */
-            results?: components["schemas"]["TopicClassificationResult"][];
-            /** @description The assistant's one- or two-sentence summary; absent when a rule settled the topics. */
-            summary?: string;
-        };
-        TopicClassificationRuleSummary: {
-            /** @description Topic name. */
-            topic?: string;
-            rule?: components["schemas"]["TopicRule"];
-        };
-        CompileTopicClassificationPromptResponse: {
-            prompt?: string;
-            rules?: components["schemas"]["TopicClassificationRuleSummary"][];
-            /** Format: int32 */
-            estimatedTokens?: number;
-        };
-        /** @description A person's change of a document's topics away from the assistant's. Created by ApproveContribution with `recordCorrection` when the approved topics differ from the suggested ones, and by UpdateItem `document.topics` when it replaces assistant-applied topics. */
-        TopicCorrection: {
-            /** @description `workspaces/{workspace}/topicCorrections/{topicCorrection}`. */
-            readonly name?: string;
-            /** @description The corrected document's Item name; historical (MergeItem does not re-point it). Omitted when the caller cannot see it. */
-            readonly item?: string;
-            /** @description The document's title; omitted when the caller cannot see it. */
-            readonly itemDisplayName?: string;
-            /** @description The assistant's topics the person removed. */
-            readonly fromTopics?: string[];
-            /** @description The topics the person chose that the assistant had not. */
-            readonly toTopics?: string[];
-            /** @description Member name of the person who changed the topics. */
-            readonly actor?: string;
-            /** @enum {string} */
-            readonly state?: "OPEN" | "DISMISSED";
-            /** Format: date-time */
-            readonly createTime?: string;
-        };
-        ListTopicCorrectionsResponse: {
-            topicCorrections?: components["schemas"]["TopicCorrection"][];
-            nextPageToken?: string;
-            /** Format: int32 */
-            totalSize?: number;
-        };
-        DismissTopicCorrectionRequest: Record<string, never>;
         /** @description A shortcut is a reference that puts an existing DOCUMENT inside another COLLECTION (the container) without copying it. A shortcut never grants access: it is visible only to callers who can read both the container and the target (visibility rule, no reviewer exception). Shortcuts are not hierarchy: they never affect `parentItem`, `ancestors`, the `ancestors:` filter of ListItems, SearchItems and ingestion selectors, conversation scope, `childCount` or `documentCount`. Moving the target leaves its shortcuts in place; moving the target into a container that has a shortcut to it deletes that shortcut in the same transaction. DeleteItem on the container deletes its shortcuts with the rest of the subtree (same cohort) and UndeleteItem restores them. A DELETED target hides the shortcut without deleting it; UndeleteItem on the target makes it visible again. MergeItem re-points shortcuts to a duplicate onto the kept document (a shortcut the container already has to it wins). */
         ItemShortcut: {
             /** @description `workspaces/{workspace}/items/{item}/shortcuts/{shortcut}`; `{item}` is the container COLLECTION, shortcut ID = target item ID. */
@@ -6482,13 +6809,13 @@ export interface components {
         IngestionRunSelector: {
             /** @description Explicit documents; a non-DOCUMENT item is INVALID_ARGUMENT (400). On reads, only items visible to the caller are echoed. */
             items?: string[];
-            /** @description AIP-160 filter over documents with the fields and semantics of ListItems `filter`: `ancestors:`, `parentItem`, `displayName`, `itemType`, `document.mimeType`, `document.topics:`, `document.owner`, `document.publicationState`, `document.collectionKind`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `updateTime`. Example: `ancestors:"workspaces/w/items/c" AND document.indexingState = PENDING`. An item it names that the caller cannot read is PERMISSION_DENIED (403). On reads, echoed only to callers who can read every item it names. */
+            /** @description AIP-160 filter over documents with the fields and semantics of ListItems `filter`: `ancestors:`, `parentItem`, `displayName`, `itemType`, `document.mimeType`, `document.concepts:`, `document.owner`, `document.publicationState`, `document.collectionKind`, `document.contentState`, `document.indexingState`, `document.origin.source`, `document.verification.state`, `updateTime`. Example: `ancestors:"workspaces/w/items/c" AND document.indexingState = PENDING`. An item it names that the caller cannot read is PERMISSION_DENIED (403). On reads, echoed only to callers who can read every item it names. */
             filter?: string;
         };
-        /** @description Context for the CLASSIFYING step of the run's contextual retrieval: which topics it may assign to each document, and a note it reads with every document. Without it, every ACTIVE topic is a candidate. Topics it assigns are assistant-applied: they replace only earlier assistant-applied topics, never topics a person chose. Classification never publishes. */
+        /** @description Context for the CLASSIFYING step of the run: concepts that narrow the candidates and a note it reads with every document. Without it, every published concept is a candidate. Machine assignments never replace a person's. */
         IngestionRunClassification: {
-            /** @description Candidate topics; empty = every ACTIVE topic. An unknown, deleted or non-ACTIVE topic is INVALID_ARGUMENT (400). */
-            topics?: string[];
+            /** @description Candidate concepts with the concepts under them; empty = every published concept. An unknown or unpublished concept is INVALID_ARGUMENT (400). */
+            concepts?: string[];
             /** @description Free-text context for the classifier, read with each document's title. */
             note?: string;
         };
@@ -6513,10 +6840,15 @@ export interface components {
             selector?: components["schemas"]["IngestionRunSelector"];
             /** @description Optional on create; immutable. A retry keeps the retried run's classification. Omitted for platform callers and `workspaces/-` reads. */
             classification?: components["schemas"]["IngestionRunClassification"];
+            /** @description Optional on create (default false); immutable. Classify again from the stored Structured Document and chunks: no re-parse, no re-embedding; one model call per document at most. Runs a publish starts (`trigger` TAXONOMY) are classify-only. */
+            classifyOnly?: boolean;
             /** @description Optional on create (default false); immutable. Read the text inside every picture of the documents (Office files, HTML, the typed pages of PDFs) with the configured vision model, placed with each picture. Slower, and one model call per distinct picture. Scanned PDF pages are transcribed whatever this says. True without a configured vision model → FAILED_PRECONDITION (400) reason VISION_MODEL_UNAVAILABLE. A retry keeps the retried run's value. */
             readImages?: boolean;
-            /** @enum {string} */
-            trigger?: "MANUAL" | "API" | "SCHEDULE" | "PLATFORM_RETRY";
+            /**
+             * @description TAXONOMY = started by PublishConceptScheme to reclassify the documents a new version affects; system-only (CreateIngestionRun with TAXONOMY → INVALID_ARGUMENT on `trigger`). RetryIngestionRun keeps `classifyOnly`.
+             * @enum {string}
+             */
+            trigger?: "MANUAL" | "API" | "SCHEDULE" | "PLATFORM_RETRY" | "TAXONOMY";
             /** @enum {string} */
             readonly state?: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
             /** @description Counts only tasks whose item the caller can see (Item visibility rule); platform callers get full counts without names. */
@@ -6688,7 +7020,7 @@ export interface components {
             attachments?: string[];
             /** @description workspaces/{workspace}/conversations/{conversation}/messages/{message}; that message and later ones are replaced. */
             replaceFromMessage?: string;
-            /** @description An artifact of this conversation (`workspaces/{workspace}/artifacts/{artifact}`) the message asks to change: the assistant reads its current revision in the sandbox and writes the changed file under the same file name, which records it as the artifact's next revision (ASSISTANT author). This is how a file the sandbox made (a spreadsheet, a Word document, slides) is revised; a text artifact can also be revised with ReviseArtifact. Not an artifact of this conversation, or deleted → INVALID_ARGUMENT; GENERATING, or file work turned off for the workspace → FAILED_PRECONDITION. */
+            /** @description A file of this conversation (`workspaces/{workspace}/artifacts/{artifact}`, kind FILE) the message asks to change: the assistant reads its current revision in the sandbox and writes the changed file under the same file name, which records it as the artifact's next revision (ASSISTANT author). Asking for changes to a file in chat is always such a turn, whatever the file's format. Not a file of this conversation, or deleted → INVALID_ARGUMENT; GENERATING, or file work turned off for the workspace → FAILED_PRECONDITION. */
             editArtifact?: string;
         };
         Message: {
@@ -7262,6 +7594,731 @@ export interface components {
             /** @description Optional current Request etag; a mismatch → 409 ABORTED. */
             etag?: string;
         };
+        /** @description A taxonomy axis (skos:ConceptScheme) with its assignment settings. The concepts, groups and settings form an editable working copy; machines (classification, query mapping, filters and facets through the hierarchy) read only the published versions. */
+        ConceptScheme: {
+            /** @description `workspaces/{workspace}/conceptSchemes/{conceptScheme}`, or `conceptSchemes/{conceptScheme}` for a platform template. The ID is a code such as `domain`, `function`, `document-type`, `audience`, `org-unit`, `program`, `subject`. */
+            readonly name?: string;
+            /** @description Required on create. */
+            displayName?: string;
+            description?: string;
+            /**
+             * @description Immutable; required on create unless forking. CLASSIFICATION schemes label documents; AUTHORITY schemes (org units, programs, campuses) are never classification targets: document metadata and member affiliations reference their concepts.
+             * @enum {string}
+             */
+            purpose?: "CLASSIFICATION" | "AUTHORITY";
+            /**
+             * Format: int32
+             * @description Tab order; the lowest-position classification scheme feeds Home (`featuredConcepts`).
+             */
+            position?: number;
+            cardinality?: components["schemas"]["ConceptSchemeCardinality"];
+            /**
+             * Format: int32
+             * @description Levels allowed below the scheme (1 = flat).
+             */
+            maxDepth?: number;
+            /** @description False: top concepts are never assigned; documents roll up to them through the hierarchy. */
+            assignTopConcepts?: boolean;
+            /** @description Assignments may target a section of the Structured Document. */
+            sectionAssignments?: boolean;
+            /**
+             * @description When classification asks the model for this scheme: ALWAYS, FALLBACK (only when rules did not settle it), NEVER (authority schemes).
+             * @enum {string}
+             */
+            llmPolicy?: "ALWAYS" | "FALLBACK" | "NEVER";
+            /**
+             * Format: float
+             * @description Confidence at or above which a machine assignment is ACCEPTED; classification schemes only.
+             */
+            autoThreshold?: number;
+            /**
+             * Format: float
+             * @description Confidence at or above which it is SUGGESTED (below: not recorded; the document is in the scheme's unclassified pool). ≤ `autoThreshold`.
+             */
+            reviewThreshold?: number;
+            /** @description Platform template `conceptSchemes/{conceptScheme}` the scheme was forked from. Input on create only (fork); output afterwards. */
+            template?: string;
+            /**
+             * Format: int32
+             * @description The template version the fork last took (fork, ApplyConceptSchemeTemplateChanges).
+             */
+            readonly templateVersion?: number;
+            /**
+             * Format: int32
+             * @description Latest published version; absent while never published.
+             */
+            readonly publishedVersion?: number;
+            /**
+             * Format: int32
+             * @description Changes in the working copy since the last version (what the next publish records).
+             */
+            readonly unpublishedChanges?: number;
+            /** Format: date-time */
+            readonly createTime?: string;
+            /** Format: date-time */
+            readonly updateTime?: string;
+            etag?: string;
+        };
+        /** @description Labels per document of a classification scheme. */
+        ConceptSchemeCardinality: {
+            /**
+             * Format: int32
+             * @description Accepted whole-document labels a classified document needs (0 = may be empty).
+             */
+            min?: number;
+            /**
+             * Format: int32
+             * @description At most this many accepted whole-document labels; absent = unbounded.
+             */
+            max?: number;
+            /** @description Exactly one accepted whole-document label is primary when there is any. */
+            primary?: boolean;
+        };
+        ListConceptSchemesResponse: {
+            conceptSchemes?: components["schemas"]["ConceptScheme"][];
+            nextPageToken?: string;
+            /** Format: int32 */
+            totalSize?: number;
+        };
+        /** @description A label (skos:prefLabel/altLabel/hiddenLabel). Labels are compared normalized (NFC, case and spacing folded, surrounding punctuation stripped; diacritics kept, so `khoa` ≠ `khóa`). */
+        ConceptLabel: {
+            /** @description BCP-47 language, e.g. `vi`, `en`. */
+            languageCode: string;
+            text: string;
+        };
+        /** @description A SKOS mapping to an external code. */
+        ConceptMapping: {
+            /** @description Target code system, e.g. `moet-program`, `isced-f-2013`, `org-unit`. */
+            system: string;
+            code: string;
+            label?: string;
+            /**
+             * @description skos:exactMatch, closeMatch, broadMatch, narrowMatch.
+             * @enum {string}
+             */
+            match: "EXACT" | "CLOSE" | "BROAD" | "NARROW";
+        };
+        /** @description One skos:Concept of a scheme's working copy. */
+        Concept: {
+            /** @description `…/conceptSchemes/{conceptScheme}/concepts/{concept}`; the concept ID is its notation (skos:notation): immutable and never reused in the scheme. */
+            readonly name?: string;
+            /** @description The `vi` prefLabel, else the first one. */
+            readonly displayName?: string;
+            /** @description At most one per language; a `vi` one is required to publish. */
+            prefLabels?: components["schemas"]["ConceptLabel"][];
+            /** @description Other names, synonyms, abbreviations. */
+            altLabels?: components["schemas"]["ConceptLabel"][];
+            /** @description Matched but never shown (misspellings, query phrasings). */
+            hiddenLabels?: components["schemas"]["ConceptLabel"][];
+            /** @description skos:definition; required to publish. */
+            definition?: string;
+            /** @description What belongs here and what does not. */
+            scopeNote?: string;
+            /** @description skos:example literals. */
+            examples?: string[];
+            /** @description Parents in the same scheme (several = poly-hierarchy); empty = top concept. */
+            broader?: string[];
+            /** @description Associated concepts of the same scheme (symmetric; never an ancestor or descendant). */
+            related?: string[];
+            mappings?: components["schemas"]["ConceptMapping"][];
+            /** @description RE2-compatible patterns over the title, number/symbol and first heading (document types: `/QĐ-`, `^QUY CHẾ`). */
+            matchPatterns?: string[];
+            /** @description Queries for this concept rank recent documents first (notices, plans, news). */
+            timeSensitive?: boolean;
+            /** @description `#rrggbb`, top concepts only; narrower concepts show their top concept's. */
+            color?: string;
+            /** @description Icon name. */
+            icon?: string;
+            /**
+             * @description DRAFT until the scheme is next published; DEPRECATED by DeprecateConcept at the next publish; DELETED = a deleted draft.
+             * @enum {string}
+             */
+            readonly state?: "DRAFT" | "PUBLISHED" | "DEPRECATED" | "DELETED";
+            /** @description DeprecateConcept was called; the next publish deprecates it. */
+            readonly deprecationPending?: boolean;
+            /** @description dct:isReplacedBy (pending or done). */
+            readonly replacedBy?: string[];
+            /** @description Groups holding it. */
+            readonly groups?: string[];
+            /** @description The platform template concept it was forked from. */
+            readonly templateConcept?: string;
+            /**
+             * Format: int32
+             * @description Version that first published it.
+             */
+            readonly firstVersion?: number;
+            /** Format: int32 */
+            readonly deprecatedVersion?: number;
+            /**
+             * Format: int32
+             * @description Readable documents (visibility rule) with an ACCEPTED assignment of it or of any concept under it, each once.
+             */
+            readonly documentCount?: number;
+            /**
+             * Format: int32
+             * @description Readable documents with a SUGGESTED assignment of it or of any concept under it.
+             */
+            readonly inReviewCount?: number;
+            /** Format: date-time */
+            readonly createTime?: string;
+            /** Format: date-time */
+            readonly updateTime?: string;
+            /** Format: date-time */
+            readonly deleteTime?: string;
+            etag?: string;
+        };
+        ListConceptsResponse: {
+            concepts?: components["schemas"]["Concept"][];
+            nextPageToken?: string;
+            /** Format: int32 */
+            totalSize?: number;
+        };
+        DeprecateConceptRequest: {
+            /** @description One concept = merge; several = split; empty = deprecated without replacement. */
+            replacedBy?: string[];
+            etag?: string;
+        };
+        /** @description A display grouping of concepts (skos:Collection); never a classification target. */
+        ConceptGroup: {
+            /** @description `…/conceptSchemes/{conceptScheme}/groups/{group}`. */
+            readonly name?: string;
+            /** @description Required on create. */
+            displayName?: string;
+            /** Format: int32 */
+            position?: number;
+            /** @description Concepts of the scheme, in display order. */
+            members?: string[];
+            /** @description A question naming one member matches every member. */
+            queryExpansion?: boolean;
+            /** Format: date-time */
+            readonly createTime?: string;
+            /** Format: date-time */
+            readonly updateTime?: string;
+            etag?: string;
+        };
+        ListConceptGroupsResponse: {
+            conceptGroups?: components["schemas"]["ConceptGroup"][];
+            nextPageToken?: string;
+        };
+        /** @description One difference from the previous version. */
+        ConceptChange: {
+            /**
+             * @description ADDED a new concept; RELABELED its labels; REDEFINED its definition, scope note, examples, related concepts, mappings, patterns, colour or icon; MOVED its broader concepts; DEPRECATED (with `replacedBy`); THRESHOLDS the scheme thresholds; SETTINGS other scheme settings; GROUPS a group.
+             * @enum {string}
+             */
+            kind?: "ADDED" | "RELABELED" | "REDEFINED" | "MOVED" | "DEPRECATED" | "THRESHOLDS" | "SETTINGS" | "GROUPS";
+            /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+            concept?: string;
+            /** @description Group name (GROUPS). */
+            group?: string;
+            replacedBy?: string[];
+        };
+        /** @description Does not block publishing. */
+        ConceptSchemeWarning: {
+            /**
+             * @description W1 an alt/hidden label shared by concepts of the scheme; W3 top concepts outside 8–20; W4 a concept often corrected by reviewers without a scope note.
+             * @enum {string}
+             */
+            kind?: "SHARED_LABEL" | "TOP_CONCEPT_COUNT" | "MISSING_SCOPE_NOTE";
+            concepts?: string[];
+            /** @description The shared normalized label (SHARED_LABEL). */
+            label?: string;
+            message?: string;
+        };
+        /** @description Blocks publishing. */
+        ConceptSchemeViolation: {
+            /**
+             * @description I2 labels disjoint within a concept; I3 broader cycle; I4 related between an ancestor and a descendant; I6 depth over `maxDepth`; I7 missing definition or `vi` prefLabel; I8 deprecated concept with live narrower concepts or an invalid replacement.
+             * @enum {string}
+             */
+            invariant?: "DISJOINT_LABELS" | "BROADER_CYCLE" | "RELATED_IN_HIERARCHY" | "MAX_DEPTH" | "DEFINITION_REQUIRED" | "DEPRECATION";
+            concepts?: string[];
+            message?: string;
+        };
+        /** @description What the publish reclassifies. Renames, definition edits, moves, settings and group changes reclassify nothing; changed `matchPatterns` re-evaluate the scheme's pattern labels without the model; deprecated concepts without replacement have their machine assignments rejected, and documents left without a label of a scheme with `minLabels` ≥ 1 rerun that scheme. */
+        ConceptReclassification: {
+            /**
+             * Format: int32
+             * @description Assignments moved to the replacement of a merged concept, in the publish transaction.
+             */
+            readonly remappedCount?: number;
+            /** @description Split: the documents of `concept` are reranked among `among`. */
+            readonly rerank?: {
+                /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+                concept?: string;
+                among?: string[];
+            }[];
+            /** @description New narrower concepts: the documents of `parent` are reranked among `among`. */
+            readonly rerunParents?: {
+                /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+                parent?: string;
+                among?: string[];
+            }[];
+            /** @description Concepts whose `matchPatterns` changed: the documents whose current label of the scheme came from a pattern or rule, or whose title, number or first heading the old or new patterns match, get their pattern labels re-evaluated (and the `implies` rules that follow), without the model. */
+            readonly patternsChanged?: string[];
+            /** @description Machine assignments are re-routed by their stored confidence (no model call). */
+            readonly thresholdsChanged?: boolean;
+            /** @enum {string} */
+            readonly state?: "PENDING" | "RUNNING" | "DONE";
+            /** @description The CLASSIFY_ONLY runs it started. */
+            readonly runs?: string[];
+        };
+        /** @description An immutable published version: the snapshot classification, query mapping and export read. */
+        ConceptSchemeVersion: {
+            /** @description `…/conceptSchemes/{conceptScheme}/versions/{version}`. */
+            readonly name?: string;
+            /** Format: int32 */
+            readonly version?: number;
+            /** Format: date-time */
+            readonly publishTime?: string;
+            /** @description `users/{user}`. */
+            readonly publisher?: string;
+            /**
+             * Format: int32
+             * @description Published concepts in the version.
+             */
+            readonly conceptCount?: number;
+            readonly changes?: components["schemas"]["ConceptChange"][];
+            readonly warnings?: components["schemas"]["ConceptSchemeWarning"][];
+            /** @description Only in the response of PublishConceptScheme `validateOnly`; a stored version has none. */
+            readonly violations?: components["schemas"]["ConceptSchemeViolation"][];
+            reclassification?: components["schemas"]["ConceptReclassification"];
+        };
+        ListConceptSchemeVersionsResponse: {
+            conceptSchemeVersions?: components["schemas"]["ConceptSchemeVersion"][];
+            nextPageToken?: string;
+        };
+        PublishConceptSchemeRequest: {
+            /** @description The scheme etag the publisher saw; mismatch → ABORTED (409). */
+            etag?: string;
+            /** @description Validate and preview; store nothing. */
+            validateOnly?: boolean;
+        };
+        /** @description Operation.metadata for PublishConceptScheme. */
+        PublishConceptSchemeMetadata: {
+            /** @description The published scheme. */
+            conceptScheme?: string;
+            /** Format: int32 */
+            progressPercent?: number;
+            /** Format: date-time */
+            createTime?: string;
+        };
+        ExportConceptSchemeVersionResponse: {
+            /** @enum {string} */
+            readonly format?: "TURTLE" | "JSON_LD";
+            /** @description `text/turtle` or `application/ld+json`. */
+            readonly mimeType?: string;
+            /** @description The SKOS document. */
+            readonly content?: string;
+        };
+        /** @description One spreadsheet row; columns are strings as in the CSV. An absent column keeps the concept's value, an empty one clears it. */
+        ConceptImportRow: {
+            /** @description Concept ID; matches an existing concept of the scheme or creates a DRAFT one. */
+            notation: string;
+            /** @description `|`-separated notations of parent concepts in the scheme. */
+            broader?: string;
+            /** @description `|`-separated notations of related concepts in the scheme. */
+            related?: string;
+            /** @description `vi` prefLabel. */
+            prefVi?: string;
+            /** @description `en` prefLabel. */
+            prefEn?: string;
+            /** @description `|`-separated `vi` alt labels. */
+            altVi?: string;
+            /** @description `|`-separated `en` alt labels. */
+            altEn?: string;
+            /** @description `|`-separated `vi` hidden labels. */
+            hidden?: string;
+            definition?: string;
+            scopeNote?: string;
+            /** @description `|`-separated examples. */
+            examples?: string;
+            color?: string;
+            icon?: string;
+            /** @description `|`-separated patterns. */
+            matchPatterns?: string;
+            /** @description `true` or `false`. */
+            timeSensitive?: string;
+            /** @description `|`-separated `system:code:match` (match `exact`, `close`, `broad`, `narrow`). */
+            mappings?: string;
+        };
+        ImportConceptsRequest: {
+            rows: components["schemas"]["ConceptImportRow"][];
+            /** @description Report what the import would do; store nothing. */
+            validateOnly?: boolean;
+        };
+        ImportConceptsResponse: {
+            created?: string[];
+            updated?: string[];
+            /** Format: int32 */
+            unchangedCount?: number;
+        };
+        /** @description One template change since the version the fork took. */
+        TemplateChange: {
+            /** @description Stable ID of the change within the diff; ApplyConceptSchemeTemplateChanges selects by it. */
+            key?: string;
+            /** @enum {string} */
+            kind?: "ADD_CONCEPT" | "UPDATE_CONCEPT" | "DEPRECATE_CONCEPT" | "UPDATE_SCHEME";
+            /** @description The fork's concept (UPDATE_CONCEPT, DEPRECATE_CONCEPT) or the new concept's name in the fork (ADD_CONCEPT). */
+            concept?: string;
+            /** @description Changed Concept or ConceptScheme field (UPDATE_*), e.g. `definition`, `altLabels`, `broader`, `autoThreshold`. */
+            field?: string;
+            /** @description The field in the template version the fork took (JSON value). */
+            baseValue?: unknown;
+            /** @description The field in the template's latest version (JSON value). */
+            templateValue?: unknown;
+            /** @description The field in the fork's working copy (JSON value). */
+            currentValue?: unknown;
+            /** @description DEPRECATE_CONCEPT: the fork's concepts for the template's replacements. */
+            replacedBy?: string[];
+            /** @description The fork changed the same field itself (or already holds the notation); never applied. */
+            conflict?: boolean;
+        };
+        DiffConceptSchemeTemplateResponse: {
+            /** @description `conceptSchemes/{conceptScheme}`. */
+            template?: string;
+            /**
+             * Format: int32
+             * @description The fork's `templateVersion`.
+             */
+            fromVersion?: number;
+            /**
+             * Format: int32
+             * @description The template's latest version.
+             */
+            toVersion?: number;
+            changes?: components["schemas"]["TemplateChange"][];
+        };
+        ApplyConceptSchemeTemplateChangesRequest: {
+            changes?: string[];
+            etag?: string;
+        };
+        /** @description Exactly one field, else INVALID_ARGUMENT. */
+        ConceptRuleCondition: {
+            /** @description A concept of any scheme of the workspace (a document type, an issuing unit, a program). */
+            concept?: string;
+            /** @description A COLLECTION item; matches its subtree. */
+            collection?: string;
+            /** @description `workspaces/{workspace}/sources/{source}`. */
+            source?: string;
+        };
+        /** @description A classification rule (not versioned; audited). */
+        ConceptRule: {
+            /** @description `workspaces/{workspace}/conceptRules/{conceptRule}`. */
+            readonly name?: string;
+            when?: components["schemas"]["ConceptRuleCondition"];
+            /** @description A concept of a classification scheme. */
+            then?: string;
+            /** @enum {string} */
+            effect?: "IMPLIES" | "PRIOR";
+            /**
+             * Format: float
+             * @description PRIOR only.
+             */
+            weight?: number;
+            /** @description `workspaces/{workspace}/members/{member}`. */
+            readonly creator?: string;
+            /** Format: date-time */
+            readonly createTime?: string;
+            etag?: string;
+        };
+        ListConceptRulesResponse: {
+            conceptRules?: components["schemas"]["ConceptRule"][];
+            nextPageToken?: string;
+            /** Format: int32 */
+            totalSize?: number;
+        };
+        /** @description A proposed concept or label. */
+        ConceptProposal: {
+            /** @description `workspaces/{workspace}/conceptProposals/{conceptProposal}`. */
+            readonly name?: string;
+            /** @description Scheme name. */
+            readonly scheme?: string;
+            /** @enum {string} */
+            readonly kind?: "NEW_CONCEPT" | "LABEL";
+            /** @description The proposed concept name, or the proposed label text (LABEL). */
+            readonly displayName?: string;
+            readonly definition?: string;
+            /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+            readonly suggestedBroader?: string;
+            /** @description LABEL: the concept that would get the label. */
+            readonly targetConcept?: string;
+            /** @enum {string} */
+            readonly origin?: "CLUSTER" | "CORRECTION" | "MEMBER";
+            /** @enum {string} */
+            readonly state?: "OPEN" | "ACCEPTED" | "REJECTED";
+            /** @description The DRAFT concept accepting created (NEW_CONCEPT). */
+            readonly concept?: string;
+            /** @description Documents that motivated it; only those the caller can read. */
+            readonly evidence?: string[];
+            /** @description `users/{user}`. */
+            readonly decider?: string;
+            /** Format: date-time */
+            readonly decideTime?: string;
+            /** Format: date-time */
+            readonly createTime?: string;
+        };
+        ListConceptProposalsResponse: {
+            conceptProposals?: components["schemas"]["ConceptProposal"][];
+            nextPageToken?: string;
+            /** Format: int32 */
+            totalSize?: number;
+        };
+        /** @description NEW_CONCEPT: `concept` fields (labels, definition, broader, …) override the proposal's. */
+        AcceptConceptProposalRequest: {
+            /** @description NEW_CONCEPT: notation of the created concept (required). */
+            conceptId?: string;
+            concept?: components["schemas"]["Concept"];
+            /**
+             * @description LABEL: kind of the added label (default ALT).
+             * @enum {string}
+             */
+            labelKind?: "ALT" | "HIDDEN";
+            /** @description LABEL: language of the added label (default `vi`). */
+            languageCode?: string;
+        };
+        RejectConceptProposalRequest: Record<string, never>;
+        SharedLabelConcept: {
+            /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+            concept?: string;
+            /** @description Scheme name. */
+            scheme?: string;
+            /** @enum {string} */
+            kind?: "PREF" | "ALT" | "HIDDEN";
+            languageCode?: string;
+            text?: string;
+        };
+        SharedLabel: {
+            /** @description The normalized label. */
+            label?: string;
+            /** @description Shared across schemes (W2) rather than within one scheme (W1). */
+            crossScheme?: boolean;
+            concepts?: components["schemas"]["SharedLabelConcept"][];
+        };
+        ListSharedLabelsResponse: {
+            sharedLabels?: components["schemas"]["SharedLabel"][];
+            nextPageToken?: string;
+        };
+        DocumentConceptEvidence: {
+            /** @description The passage the decision rests on. */
+            quote?: string;
+        };
+        /** @description One concept assignment of a document. */
+        DocumentConcept: {
+            /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+            concept?: string;
+            /** @description Scheme name. */
+            readonly scheme?: string;
+            /** @description The primary label of a scheme with a primary. */
+            primary?: boolean;
+            /** @description A Structured Document node ref when the label targets a section; absent = the whole document. */
+            readonly section?: string;
+            /**
+             * Format: float
+             * @description Machine confidence; absent for HUMAN.
+             */
+            readonly confidence?: number;
+            /** @enum {string} */
+            readonly source?: "RULE" | "LEXICAL" | "KNN" | "LLM" | "HUMAN";
+            /**
+             * @description Reads omit REJECTED assignments.
+             * @enum {string}
+             */
+            readonly state?: "SUGGESTED" | "ACCEPTED";
+            readonly evidence?: components["schemas"]["DocumentConceptEvidence"];
+            /** @description `users/{user}` who accepted or set it. */
+            readonly reviewer?: string;
+            /** Format: date-time */
+            readonly reviewTime?: string;
+        };
+        /** @description Official-document metadata; extracted during processing, and never overwritten by extraction once a person set it. */
+        DocumentIssuance: {
+            /** @description Issuing unit: an `org-unit` concept name. */
+            issuer?: string;
+            /** @description Campus concept name. */
+            campus?: string;
+            /** @description Number and symbol as printed, e.g. `123/QĐ-ĐHCNKT-ĐT`. */
+            number?: string;
+            /**
+             * Format: date
+             * @description Date issued.
+             */
+            issueDate?: string;
+            /** Format: date */
+            effectiveDate?: string;
+            supersedes?: string[];
+        };
+        /** @description Whom the document applies to. */
+        DocumentApplicability: {
+            /**
+             * @description Absent = unknown (treated as INSTITUTION).
+             * @enum {string}
+             */
+            level?: "INSTITUTION" | "UNIT" | "PROGRAM" | "COHORT";
+            units?: string[];
+            programs?: string[];
+            cohorts?: number[];
+        };
+        TestClassificationRequest: {
+            title: string;
+            text?: string;
+            /** @description A COLLECTION item the sample would be in (rules). */
+            collection?: string;
+            /** @description `workspaces/{workspace}/sources/{source}` it would come from (rules). */
+            source?: string;
+        };
+        ClassificationOutcome: {
+            /** @description Scheme name. */
+            scheme?: string;
+            /** @enum {string} */
+            outcome?: "ASSIGNED" | "EMPTY" | "UNCERTAIN" | "FAILED";
+            /** Format: float */
+            confidence?: number;
+        };
+        ClassificationSignal: {
+            /** @enum {string} */
+            kind?: "RULE" | "LEXICAL" | "CARD" | "KNN" | "PRIOR";
+            /** Format: float */
+            score?: number;
+        };
+        ClassificationCandidate: {
+            /** @description Scheme name. */
+            scheme?: string;
+            /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+            concept?: string;
+            /** Format: float */
+            score?: number;
+            signals?: components["schemas"]["ClassificationSignal"][];
+        };
+        TestClassificationResponse: {
+            assignments?: components["schemas"]["DocumentConcept"][];
+            outcomes?: components["schemas"]["ClassificationOutcome"][];
+            /** @description Ranked per scheme. */
+            candidates?: components["schemas"]["ClassificationCandidate"][];
+            issuance?: components["schemas"]["DocumentIssuance"];
+            applicability?: components["schemas"]["DocumentApplicability"];
+            summary?: string;
+            /** @description Whether the contextualization model was called. */
+            modelCalled?: boolean;
+        };
+        CompileClassificationPromptResponse: {
+            prompt?: string;
+            /** @description Rules in effect, checked before the model. */
+            rules?: string[];
+            /** Format: int32 */
+            estimatedTokens?: number;
+        };
+        ConfirmConceptAssignmentsRequest: {
+            /** @description ListItems document filter; empty = every document the caller may edit. */
+            filter?: string;
+        };
+        ConfirmConceptAssignmentsResponse: {
+            /** Format: int32 */
+            confirmedCount?: number;
+        };
+        RejectConceptAssignmentsRequest: {
+            /** @description ListItems document filter; empty = every document the caller may edit. */
+            filter?: string;
+        };
+        RejectConceptAssignmentsResponse: {
+            /** Format: int32 */
+            rejectedCount?: number;
+        };
+        /** @description How the query text was understood; omitted when it names no concept. Concepts boost matching documents and add a recall pass; they never filter. */
+        SearchItemsInterpretation: {
+            /** @description Query terms mapped to published concepts (labels, folded diacritics, group expansion). */
+            readonly concepts?: {
+                /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+                concept?: string;
+                /** @description The words of the query it was read from. */
+                text?: string;
+            }[];
+            /** @description Terms several schemes share that the query did not settle: at most 3 options in scheme tab order; `displayName` = "scheme: concepts"; `filter` = the option's concepts ORed. */
+            readonly ambiguities?: {
+                text?: string;
+                options?: {
+                    /** @description Scheme name. */
+                    scheme?: string;
+                    concepts?: string[];
+                    /** @description The `document.concepts` filter that picks this reading. */
+                    filter?: string;
+                    displayName?: string;
+                }[];
+            }[];
+            /** @description At most 5 results per ambiguity option (same filter and visibility); first page only. */
+            readonly groups?: {
+                /** @description The option's `displayName`. */
+                option?: string;
+                results?: components["schemas"]["SearchItemsResult"][];
+            }[];
+        };
+        MemberHomeFeaturedConcept: {
+            /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+            readonly concept?: string;
+            readonly displayName?: string;
+            /** @description The concept's definition. */
+            readonly description?: string;
+            readonly icon?: string;
+            /** @description `#rrggbb`. */
+            readonly color?: string;
+            /**
+             * Format: int32
+             * @description Readable published documents assigned it or any concept under it.
+             */
+            readonly documentCount?: number;
+            /**
+             * Format: int32
+             * @description Of those, the ones whose content changed in the last 30 days.
+             */
+            readonly newDocumentCount?: number;
+            readonly topConcepts?: {
+                /** @description Concept name `…/conceptSchemes/{conceptScheme}/concepts/{concept}`. */
+                readonly concept?: string;
+                readonly displayName?: string;
+                /** Format: int32 */
+                readonly documentCount?: number;
+            }[];
+        };
+        /** @description The member's program, unit and cohort (personal data): used only to rank search and retrieval and to leave out documents explicitly scoped to other units. Present only on the caller's own membership or for holders of `members.update`; omitted otherwise. Not accepted by CreateMember (INVALID_ARGUMENT on `affiliation`). */
+        MemberAffiliation: {
+            units?: string[];
+            programs?: string[];
+            /**
+             * Format: int32
+             * @description Entry year.
+             */
+            cohort?: number;
+            /**
+             * @description DIRECTORY = imported from the registrar list (ImportMemberAffiliations); ADMIN = set by UpdateMember. Members never declare it themselves.
+             * @enum {string}
+             */
+            readonly source?: "DIRECTORY" | "ADMIN";
+        };
+        /** @description A row needs `program` or `unit`. */
+        MemberAffiliationImportRow: {
+            /** @description A live member, case-insensitive. */
+            email: string;
+            /** @description Program notation, concept name, or the code of an exact mapping (e.g. MOET `7480201`). */
+            program?: string;
+            /** @description Org-unit notation or concept name. */
+            unit?: string;
+            /**
+             * Format: int32
+             * @description Entry year.
+             */
+            cohort?: number;
+        };
+        ImportMemberAffiliationsRequest: {
+            rows: components["schemas"]["MemberAffiliationImportRow"][];
+            /** @description Validate fully; store nothing; same response. */
+            validateOnly?: boolean;
+        };
+        ImportMemberAffiliationsResponse: {
+            /** @description Members whose affiliation the import set (source DIRECTORY). */
+            members?: components["schemas"]["Member"][];
+            /** @description Members whose affiliation an admin set; left untouched. */
+            skippedMembers?: string[];
+        };
     };
     responses: {
         /** @description INVALID_ARGUMENT, FAILED_PRECONDITION or OUT_OF_RANGE. */
@@ -7433,12 +8490,6 @@ export interface components {
         ItemContentPageSize: number;
         /** @description Contribution ID. */
         PathContribution: string;
-        /** @description Topic ID. */
-        PathTopic: string;
-        /** @description Optional client-chosen topic ID; taken → ALREADY_EXISTS (409). */
-        TopicId: string;
-        /** @description Topic correction ID. */
-        PathTopicCorrection: string;
         /** @description Shortcut ID (= the target item's ID; at most one live shortcut per container and target). */
         PathItemShortcut: string;
         /** @description Connector ID. */
@@ -7499,6 +8550,28 @@ export interface components {
         CollabSpaceId: string;
         /** @description Optional client-chosen request type ID; `^[a-z][a-z0-9-]{0,62}$`. Taken → 409 ALREADY_EXISTS. */
         CollabRequestTypeId: string;
+        /** @description Client-chosen scheme ID (code). Required unless forking (defaults to the template's); taken → ALREADY_EXISTS (409). */
+        ConceptSchemeId: string;
+        /** @description Concept scheme ID. */
+        PathConceptScheme: string;
+        /** @description The notation: immutable, never reused in the scheme. */
+        ConceptId: string;
+        /** @description Concept ID (notation). */
+        PathConcept: string;
+        /** @description Client-chosen group ID. */
+        ConceptGroupId: string;
+        /** @description Concept group ID. */
+        PathConceptGroup: string;
+        /** @description Version number. */
+        PathConceptSchemeVersion: string;
+        /** @description SKOS serialization. */
+        ConceptSchemeExportFormat: "TURTLE" | "JSON_LD";
+        /** @description Client-chosen rule ID; taken → ALREADY_EXISTS (409). */
+        ConceptRuleId: string;
+        /** @description Concept rule ID. */
+        PathConceptRule: string;
+        /** @description Concept proposal ID. */
+        PathConceptProposal: string;
     };
     requestBodies: never;
     headers: never;
@@ -9093,6 +10166,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Empty"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    UpdateMember: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
+                updateMask?: components["parameters"]["UpdateMask"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Member ID (= user ID), or `me` for the caller. */
+                member: components["parameters"]["PathMember"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Member"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Member"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ImportMemberAffiliations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportMemberAffiliationsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportMemberAffiliationsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -11854,7 +12994,7 @@ export interface operations {
             };
         };
     };
-    ListTopics: {
+    ListConceptSchemes: {
         parameters: {
             query?: {
                 /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
@@ -11865,10 +13005,6 @@ export interface operations {
                 filter?: components["parameters"]["Filter"];
                 /** @description Comma-separated fields, ascending by default; append " desc" for descending (AIP-132). Each List method documents the fields it accepts. */
                 orderBy?: components["parameters"]["OrderBy"];
-                /** @description Include soft-deleted resources (AIP-164). */
-                showDeleted?: components["parameters"]["ShowDeleted"];
-                /** @description Partial-response view (AIP-157). BASIC omits expensive fields; FULL returns everything. Default BASIC for List, FULL for Get. */
-                view?: components["parameters"]["View"];
             };
             header?: never;
             path: {
@@ -11879,13 +13015,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListTopicsResponse"];
+                    "application/json": components["schemas"]["ListConceptSchemesResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -11894,11 +13030,11 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    CreateTopic: {
+    CreateConceptScheme: {
         parameters: {
             query?: {
-                /** @description Optional client-chosen topic ID; taken → ALREADY_EXISTS (409). */
-                topicId?: components["parameters"]["TopicId"];
+                /** @description Client-chosen scheme ID (code). Required unless forking (defaults to the template's); taken → ALREADY_EXISTS (409). */
+                conceptSchemeId?: components["parameters"]["ConceptSchemeId"];
                 /** @description Client-generated UUID that makes the request idempotent (AIP-155). A retry with the same requestId and the same request returns the original result; reusing it for a different request is 400 INVALID_ARGUMENT with reason `REQUEST_ID_REUSED`. */
                 requestId?: components["parameters"]["RequestId"];
             };
@@ -11911,17 +13047,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Topic"];
+                "application/json": components["schemas"]["ConceptScheme"];
             };
         };
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"];
+                    "application/json": components["schemas"]["ConceptScheme"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -11931,27 +13067,27 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    GetTopic: {
+    GetConceptScheme: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Workspace ID. */
                 workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"];
+                    "application/json": components["schemas"]["ConceptScheme"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
@@ -11959,40 +13095,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    DeleteTopic: {
-        parameters: {
-            query?: {
-                /** @description Current etag of the resource; a mismatch fails with ABORTED (AIP-154). */
-                etag?: components["parameters"]["Etag"];
-            };
-            header?: never;
-            path: {
-                /** @description Workspace ID. */
-                workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Topic"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    UpdateTopic: {
+    UpdateConceptScheme: {
         parameters: {
             query?: {
                 /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
@@ -12002,24 +13105,24 @@ export interface operations {
             path: {
                 /** @description Workspace ID. */
                 workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Topic"];
+                "application/json": components["schemas"]["ConceptScheme"];
             };
         };
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"];
+                    "application/json": components["schemas"]["ConceptScheme"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12029,31 +13132,31 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    AcceptTopic: {
+    PublishConceptScheme: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Workspace ID. */
                 workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AcceptTopicRequest"];
+                "application/json": components["schemas"]["PublishConceptSchemeRequest"];
             };
         };
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"];
+                    "application/json": components["schemas"]["Operation"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12063,31 +13166,109 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    MergeTopic: {
+    ImportConcepts: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Workspace ID. */
                 workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MergeTopicRequest"];
+                "application/json": components["schemas"]["ImportConceptsRequest"];
             };
         };
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"];
+                    "application/json": components["schemas"]["ImportConceptsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ListConcepts: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+                /** @description AIP-160 filter expression. Each List method documents the fields it accepts. */
+                filter?: components["parameters"]["Filter"];
+                /** @description Comma-separated fields, ascending by default; append " desc" for descending (AIP-132). Each List method documents the fields it accepts. */
+                orderBy?: components["parameters"]["OrderBy"];
+                /** @description Include soft-deleted resources (AIP-164). */
+                showDeleted?: components["parameters"]["ShowDeleted"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    CreateConcept: {
+        parameters: {
+            query: {
+                /** @description The notation: immutable, never reused in the scheme. */
+                conceptId: components["parameters"]["ConceptId"];
+                /** @description Client-generated UUID that makes the request idempotent (AIP-155). A retry with the same requestId and the same request returns the original result; reusing it for a different request is 400 INVALID_ARGUMENT with reason `REQUEST_ID_REUSED`. */
+                requestId?: components["parameters"]["RequestId"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Concept"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12097,31 +13278,62 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    RejectTopic: {
+    GetConcept: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Workspace ID. */
                 workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RejectTopicRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"];
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    DeleteConcept: {
+        parameters: {
+            query?: {
+                /** @description Current etag of the resource; a mismatch fails with ABORTED (AIP-154). */
+                etag?: components["parameters"]["Etag"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12131,31 +13343,208 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    UndeleteTopic: {
+    UpdateConcept: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
+                updateMask?: components["parameters"]["UpdateMask"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Concept"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    DeprecateConcept: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 /** @description Workspace ID. */
                 workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UndeleteTopicRequest"];
+                "application/json": components["schemas"]["DeprecateConceptRequest"];
             };
         };
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Topic"];
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    ListConceptGroups: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptGroupsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    CreateConceptGroup: {
+        parameters: {
+            query: {
+                /** @description Client-chosen group ID. */
+                groupId: components["parameters"]["ConceptGroupId"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptGroup"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    GetConceptGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept group ID. */
+                group: components["parameters"]["PathConceptGroup"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptGroup"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    DeleteConceptGroup: {
+        parameters: {
+            query?: {
+                /** @description Current etag of the resource; a mismatch fails with ABORTED (AIP-154). */
+                etag?: components["parameters"]["Etag"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept group ID. */
+                group: components["parameters"]["PathConceptGroup"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Empty"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
@@ -12164,31 +13553,71 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
-    ConfirmTopicAssignments: {
+    UpdateConceptGroup: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
+                updateMask?: components["parameters"]["UpdateMask"];
+            };
             header?: never;
             path: {
                 /** @description Workspace ID. */
                 workspace: components["parameters"]["Workspace"];
-                /** @description Topic ID. */
-                topic: components["parameters"]["PathTopic"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept group ID. */
+                group: components["parameters"]["PathConceptGroup"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConfirmTopicAssignmentsRequest"];
+                "application/json": components["schemas"]["ConceptGroup"];
             };
         };
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConfirmTopicAssignmentsResponse"];
+                    "application/json": components["schemas"]["ConceptGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    ListConceptSchemeVersions: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptSchemeVersionsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12197,7 +13626,134 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    ImportTopics: {
+    GetConceptSchemeVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Version number. */
+                version: components["parameters"]["PathConceptSchemeVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptSchemeVersion"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ExportConceptSchemeVersion: {
+        parameters: {
+            query?: {
+                /** @description SKOS serialization. */
+                format?: components["parameters"]["ConceptSchemeExportFormat"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Version number. */
+                version: components["parameters"]["PathConceptSchemeVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportConceptSchemeVersionResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    DiffConceptSchemeTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiffConceptSchemeTemplateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ApplyConceptSchemeTemplateChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplyConceptSchemeTemplateChangesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptScheme"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    TestClassification: {
         parameters: {
             query?: never;
             header?: never;
@@ -12209,17 +13765,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ImportTopicsRequest"];
+                "application/json": components["schemas"]["TestClassificationRequest"];
             };
         };
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ImportTopicsResponse"];
+                    "application/json": components["schemas"]["TestClassificationResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -12228,38 +13784,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    TestTopicClassification: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workspace ID. */
-                workspace: components["parameters"]["Workspace"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TestTopicClassificationRequest"];
-            };
-        };
-        responses: {
-            /** @description OK. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TestTopicClassificationResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    CompileTopicClassificationPrompt: {
+    CompileClassificationPrompt: {
         parameters: {
             query?: never;
             header?: never;
@@ -12271,13 +13796,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompileTopicClassificationPromptResponse"];
+                    "application/json": components["schemas"]["CompileClassificationPromptResponse"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
@@ -12285,7 +13810,1033 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    ListTopicCorrections: {
+    ConfirmConceptAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmConceptAssignmentsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmConceptAssignmentsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    RejectConceptAssignments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectConceptAssignmentsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RejectConceptAssignmentsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ListTemplateConceptSchemes: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+                /** @description AIP-160 filter expression. Each List method documents the fields it accepts. */
+                filter?: components["parameters"]["Filter"];
+                /** @description Comma-separated fields, ascending by default; append " desc" for descending (AIP-132). Each List method documents the fields it accepts. */
+                orderBy?: components["parameters"]["OrderBy"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptSchemesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    CreateTemplateConceptScheme: {
+        parameters: {
+            query?: {
+                /** @description Client-chosen scheme ID (code). Required unless forking (defaults to the template's); taken → ALREADY_EXISTS (409). */
+                conceptSchemeId?: components["parameters"]["ConceptSchemeId"];
+                /** @description Client-generated UUID that makes the request idempotent (AIP-155). A retry with the same requestId and the same request returns the original result; reusing it for a different request is 400 INVALID_ARGUMENT with reason `REQUEST_ID_REUSED`. */
+                requestId?: components["parameters"]["RequestId"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptScheme"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptScheme"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    GetTemplateConceptScheme: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptScheme"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    UpdateTemplateConceptScheme: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
+                updateMask?: components["parameters"]["UpdateMask"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptScheme"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptScheme"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    PublishTemplateConceptScheme: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishConceptSchemeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    ImportTemplateConcepts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportConceptsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportConceptsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ListTemplateConcepts: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+                /** @description AIP-160 filter expression. Each List method documents the fields it accepts. */
+                filter?: components["parameters"]["Filter"];
+                /** @description Comma-separated fields, ascending by default; append " desc" for descending (AIP-132). Each List method documents the fields it accepts. */
+                orderBy?: components["parameters"]["OrderBy"];
+                /** @description Include soft-deleted resources (AIP-164). */
+                showDeleted?: components["parameters"]["ShowDeleted"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    CreateTemplateConcept: {
+        parameters: {
+            query: {
+                /** @description The notation: immutable, never reused in the scheme. */
+                conceptId: components["parameters"]["ConceptId"];
+                /** @description Client-generated UUID that makes the request idempotent (AIP-155). A retry with the same requestId and the same request returns the original result; reusing it for a different request is 400 INVALID_ARGUMENT with reason `REQUEST_ID_REUSED`. */
+                requestId?: components["parameters"]["RequestId"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Concept"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    GetTemplateConcept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    DeleteTemplateConcept: {
+        parameters: {
+            query?: {
+                /** @description Current etag of the resource; a mismatch fails with ABORTED (AIP-154). */
+                etag?: components["parameters"]["Etag"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    UpdateTemplateConcept: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
+                updateMask?: components["parameters"]["UpdateMask"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Concept"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    DeprecateTemplateConcept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept ID (notation). */
+                concept: components["parameters"]["PathConcept"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeprecateConceptRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Concept"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    ListTemplateConceptGroups: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptGroupsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    CreateTemplateConceptGroup: {
+        parameters: {
+            query: {
+                /** @description Client-chosen group ID. */
+                groupId: components["parameters"]["ConceptGroupId"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptGroup"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    GetTemplateConceptGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept group ID. */
+                group: components["parameters"]["PathConceptGroup"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptGroup"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    DeleteTemplateConceptGroup: {
+        parameters: {
+            query?: {
+                /** @description Current etag of the resource; a mismatch fails with ABORTED (AIP-154). */
+                etag?: components["parameters"]["Etag"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept group ID. */
+                group: components["parameters"]["PathConceptGroup"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Empty"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    UpdateTemplateConceptGroup: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
+                updateMask?: components["parameters"]["UpdateMask"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Concept group ID. */
+                group: components["parameters"]["PathConceptGroup"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptGroup"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    ListTemplateConceptSchemeVersions: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptSchemeVersionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    GetTemplateConceptSchemeVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Version number. */
+                version: components["parameters"]["PathConceptSchemeVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptSchemeVersion"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ExportTemplateConceptSchemeVersion: {
+        parameters: {
+            query?: {
+                /** @description SKOS serialization. */
+                format?: components["parameters"]["ConceptSchemeExportFormat"];
+            };
+            header?: never;
+            path: {
+                /** @description Concept scheme ID. */
+                conceptScheme: components["parameters"]["PathConceptScheme"];
+                /** @description Version number. */
+                version: components["parameters"]["PathConceptSchemeVersion"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportConceptSchemeVersionResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ListConceptRules: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+                /** @description AIP-160 filter expression. Each List method documents the fields it accepts. */
+                filter?: components["parameters"]["Filter"];
+                /** @description Comma-separated fields, ascending by default; append " desc" for descending (AIP-132). Each List method documents the fields it accepts. */
+                orderBy?: components["parameters"]["OrderBy"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptRulesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    CreateConceptRule: {
+        parameters: {
+            query: {
+                /** @description Client-chosen rule ID; taken → ALREADY_EXISTS (409). */
+                conceptRuleId: components["parameters"]["ConceptRuleId"];
+                /** @description Client-generated UUID that makes the request idempotent (AIP-155). A retry with the same requestId and the same request returns the original result; reusing it for a different request is 400 INVALID_ARGUMENT with reason `REQUEST_ID_REUSED`. */
+                requestId?: components["parameters"]["RequestId"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptRule"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptRule"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    GetConceptRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept rule ID. */
+                conceptRule: components["parameters"]["PathConceptRule"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptRule"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    DeleteConceptRule: {
+        parameters: {
+            query?: {
+                /** @description Current etag of the resource; a mismatch fails with ABORTED (AIP-154). */
+                etag?: components["parameters"]["Etag"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept rule ID. */
+                conceptRule: components["parameters"]["PathConceptRule"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Empty"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    UpdateConceptRule: {
+        parameters: {
+            query?: {
+                /** @description Comma-separated field paths to update (google.protobuf.FieldMask, AIP-134). Omitted = every populated field; `*` = full replacement. */
+                updateMask?: components["parameters"]["UpdateMask"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept rule ID. */
+                conceptRule: components["parameters"]["PathConceptRule"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConceptRule"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptRule"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    ListConceptProposals: {
+        parameters: {
+            query?: {
+                /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
+                pageSize?: components["parameters"]["PageSize"];
+                /** @description Token from a previous response's `nextPageToken`. All other parameters must match the call that produced it. */
+                pageToken?: components["parameters"]["PageToken"];
+                /** @description AIP-160 filter expression. Each List method documents the fields it accepts. */
+                filter?: components["parameters"]["Filter"];
+                /** @description Comma-separated fields, ascending by default; append " desc" for descending (AIP-132). Each List method documents the fields it accepts. */
+                orderBy?: components["parameters"]["OrderBy"];
+            };
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListConceptProposalsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    GetConceptProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept proposal ID. */
+                conceptProposal: components["parameters"]["PathConceptProposal"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptProposal"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    AcceptConceptProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept proposal ID. */
+                conceptProposal: components["parameters"]["PathConceptProposal"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptConceptProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptProposal"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    RejectConceptProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace ID. */
+                workspace: components["parameters"]["Workspace"];
+                /** @description Concept proposal ID. */
+                conceptProposal: components["parameters"]["PathConceptProposal"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectConceptProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConceptProposal"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["PermissionDenied"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    ListSharedLabels: {
         parameters: {
             query?: {
                 /** @description Maximum results to return; default 50, maximum 1000 (larger values are coerced to 1000). Negative is INVALID_ARGUMENT. */
@@ -12304,76 +14855,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description OK. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ListTopicCorrectionsResponse"];
+                    "application/json": components["schemas"]["ListSharedLabelsResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    GetTopicCorrection: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workspace ID. */
-                workspace: components["parameters"]["Workspace"];
-                /** @description Topic correction ID. */
-                topicCorrection: components["parameters"]["PathTopicCorrection"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TopicCorrection"];
-                };
-            };
-            401: components["responses"]["Unauthenticated"];
-            403: components["responses"]["PermissionDenied"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    DismissTopicCorrection: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Workspace ID. */
-                workspace: components["parameters"]["Workspace"];
-                /** @description Topic correction ID. */
-                topicCorrection: components["parameters"]["PathTopicCorrection"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DismissTopicCorrectionRequest"];
-            };
-        };
-        responses: {
-            /** @description OK. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TopicCorrection"];
-                };
-            };
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["PermissionDenied"];
             404: components["responses"]["NotFound"];

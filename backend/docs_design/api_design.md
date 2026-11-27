@@ -30,7 +30,7 @@ lifecycle, Spaces, Work, Requests, Manage, Platform console).
 | Singletons (`{parent}/settings`) have `Get`/`Update`, never `Create`/`Delete`. | [156](https://google.aip.dev/156) |
 | Revisions are a `revisions` sub-collection; each revision holds a `snapshot`; `POST {revision}:rollback`. | [162](https://google.aip.dev/162) |
 | `-` reads across parents in `List` (`workspaces/-/ingestionRuns/-/tasks`); responses use canonical names. | [159](https://google.aip.dev/159) |
-| Pagination `pageSize` (default 50, max 1000, coerced) / `pageToken` → `nextPageToken`; optional `totalSize`. Filtering `filter` ([AIP-160](https://google.aip.dev/160) syntax): on a string field a value containing `*` (quoted or not) is a case-insensitive wildcard (`displayName = "*term*"` matches a substring; `!=` negates it and, like every `!=`, also matches an unset field; `%` and `_` are literal); `field:*` tests presence (a scalar is set; a repeated field has a value, where the method lists it, e.g. ListItems `NOT document.topics:*`). Ordering `orderBy` (`"updateTime desc"`). | 132, [158](https://google.aip.dev/158), 160 |
+| Pagination `pageSize` (default 50, max 1000, coerced) / `pageToken` → `nextPageToken`; optional `totalSize`. Filtering `filter` ([AIP-160](https://google.aip.dev/160) syntax): on a string field a value containing `*` (quoted or not) is a case-insensitive wildcard (`displayName = "*term*"` matches a substring; `!=` negates it and, like every `!=`, also matches an unset field; `%` and `_` are literal); `field:*` tests presence (a scalar is set; a repeated field has a value, where the method lists it, e.g. ListItems `NOT document.concepts:*`). Ordering `orderBy` (`"updateTime desc"`). | 132, [158](https://google.aip.dev/158), 160 |
 | Partial responses: `view` enum (`BASIC`, `FULL`) where a resource has expensive parts. | [157](https://google.aip.dev/157) |
 | Create may take a user-chosen ID (`?{resource}Id=`), `validateOnly`, and `requestId` (UUID; retrying with the same id returns the first result) for idempotency. | [133](https://google.aip.dev/133), [155](https://google.aip.dev/155), [163](https://google.aip.dev/163) |
 | Optimistic concurrency: resources edited by several people carry `etag`; a stale `etag` on Update/Delete/transition is `ABORTED` (409). | [154](https://google.aip.dev/154) |
@@ -99,15 +99,15 @@ also reaches every collection and space. Owner and self rules in
 | Predefined role (`roles/…`) | Scope | Holds |
 | --- | --- | --- |
 | `workspaceAdmin` | workspace | Every permission grantable on a workspace (knowledge, taxonomy, sources, settings, people, audit) |
-| `workspaceMember` | workspace | Workspace, settings and assistant reads; members, groups, roles; `items.list`/`.search`/`.testIamPermissions` (reading itself comes from collection grants); contributions; topics; own library, conversations and artifacts; shares (`shares.*`: what a share may target is checked on the target); connector catalog; see/join/leave spaces, request types; create, list and withdraw own requests |
+| `workspaceMember` | workspace | Workspace, settings and assistant reads; members, groups, roles; `items.list`/`.search`/`.testIamPermissions` (reading itself comes from collection grants); contributions; concept schemes and concepts (read); own library, conversations and artifacts; shares (`shares.*`: what a share may target is checked on the target); connector catalog; see/join/leave spaces, request types; create, list and withdraw own requests |
 | `collectionViewer` | collection | `items.get`/`.list`/`.search`/`.testIamPermissions`, `itemShortcuts.get`/`.list`, `tasks.get`/`.list` |
 | `collectionEditor` | collection | viewer + `items.create`/`.update`/`.move`/`.publish`/`.verify`, `itemShortcuts.create`/`.delete`, `ingestionRuns.create` |
 | `collectionOwner` | collection | editor + `items.delete`/`.undelete`/`.getIamPolicy`/`.setIamPolicy`, `contributions.review`, request deciding (`COLLECTION_ACCESS`) |
 | `spaceMember` | space | Read the space, its members, announcements, events, materials, request types; leave |
 | `spaceStaff` | space | member + post announcements, events, materials; decide and answer the space's requests |
 | `spaceLead` | space | staff + update/delete the space, its IAM policy, members and request types |
-| `platformOperator` | platform | Accounts and workspaces (read), usage, pause/resume ingestion, ingestion runs/tasks (metadata), retry runs, audit metadata, connectors and ingestion policy (read), components, incidents |
-| `platformAdmin` | platform | operator + account and workspace lifecycle (create, suspend, activate, archive), connector and ingestion-policy changes, deciding `CONNECTOR` requests; never workspace content |
+| `platformOperator` | platform | Accounts and workspaces (read), usage, pause/resume ingestion, ingestion runs/tasks (metadata), retry runs, audit metadata, connectors and ingestion policy (read), taxonomy templates (read), components, incidents |
+| `platformAdmin` | platform | operator + account and workspace lifecycle (create, suspend, activate, archive), connector and ingestion-policy changes, taxonomy templates (create, edit, publish), deciding `CONNECTOR` requests; never workspace content |
 
 Custom roles live at `workspaces/{workspace}/roles/{role}`.
 
@@ -161,8 +161,14 @@ Knowledge
     …/items/{item}/revisions/{revision}
     …/items/{item}/shortcuts/{shortcut}          (collections: shortcuts to documents; shortcut ID = document ID)
   workspaces/{workspace}/contributions/{contribution}
-  workspaces/{workspace}/topics/{topic}
-  workspaces/{workspace}/topicCorrections/{topicCorrection}
+  workspaces/{workspace}/conceptSchemes/{conceptScheme}
+    …/conceptSchemes/{conceptScheme}/concepts/{concept}   (concept ID = notation)
+    …/conceptSchemes/{conceptScheme}/groups/{group}
+    …/conceptSchemes/{conceptScheme}/versions/{version}   (published, read-only)
+  workspaces/{workspace}/conceptRules/{conceptRule}
+  workspaces/{workspace}/conceptProposals/{conceptProposal}
+  workspaces/{workspace}/sharedLabels             (list only)
+  conceptSchemes/{conceptScheme}                 (platform templates; same children)
 
 Ingestion
   connectors/{connector}                         (platform catalog)
@@ -340,13 +346,18 @@ per role), `etag`. Get (members) / Update (`workspaces.updateAssistant`).
 
 **Member** `…/members/{member}` — `user`, `displayName`, `email`, `state`
 (`ACTIVE`, `SUSPENDED`), `roles[]` (output, from IAM), `groups[]` (output),
-`joinTime`, `lastActiveTime`.
+`joinTime`, `lastActiveTime`, `affiliation` (`{units[], programs[], cohort,
+source (DIRECTORY, ADMIN)}`; personal data used only to rank search and
+retrieval, shown only on the caller's own membership or to `members.update`
+holders; members never set it themselves; `auth_contract.md`).
 
 | Method | HTTP | Permission |
 | --- | --- | --- |
 | CreateMember | `POST …/members` `{user}` + `roles[]` (granted in the same call) | `members.create`; cannot grant beyond the caller's own roles |
 | GetMember / ListMembers | `GET` | `members.get` / `members.list` (filter `state`, `roles`, `groups`, `name`, `displayName` (user name, else email), `email`; a `name` filter batch-reads members, missing ones simply absent; `totalSize`) |
-| DeleteMember | `DELETE` (ends membership; account untouched) | `members.delete`; not self; not the last admin |
+| UpdateMember | `PATCH` `affiliation` (`{units[], programs[], cohort}`: org-unit and program concepts of the workspace's authority schemes, entry year; `source` becomes ADMIN) | `members.update` |
+| ImportMemberAffiliations | `POST …/members:importAffiliations {rows[] {email, program, unit, cohort}, validateOnly}` — the registrar list (`source` DIRECTORY); atomic, a bad row → INVALID_ARGUMENT on `rows[i].…`; members an admin set are left untouched (`skippedMembers`) → `{members[], skippedMembers[]}` | `members.update` |
+| DeleteMember | `DELETE` (ends membership and deletes the affiliation; account untouched) | `members.delete`; not self; not the last admin |
 | SuspendMember / ActivateMember | `POST …:suspend` / `:activate` | `members.suspend`; not self; not the last admin |
 
 Role changes are `workspaces/{workspace}:setIamPolicy` (read-modify-write with
@@ -399,7 +410,7 @@ Get/List only.
 `SOURCES`, `PEOPLE`, `SETTINGS`, `SPACES`, `REQUESTS`, `SIGN_IN`), `action`,
 `description` (fixed template: action and resource type, never titles), `target`, `outcome` (`SUCCEEDED`, `FAILED`), `ipAddress`,
 `createTime`. List/Get; List filters on `category`, `actor`, `outcome`, `action`
-(e.g. Topics' "Last imported" line reads the last `action = "ImportTopics"`) and
+(e.g. the taxonomy's "Last imported" line reads the last `action = "ImportConcepts"`) and
 `createTime`; `workspaces/-/auditEvents` lists across workspaces
 (platform). ListAuditEvents and ListPlatformAuditEvents return `totalSize`. `GET …/auditEvents:summarize?window=&timeZone=` returns counts per
 bucket (activity charts); workspace only, no `workspaces/-` form. `POST …/auditEvents:export` (`filter`) → Operation
@@ -439,8 +450,12 @@ exactly one facet:
   only; roots are always boundaries), `discoverable` (roots), `acceptsContributions`,
   `childCount`, `documentCount` (output, readable published, subtree), `shortcutCount` (output, visible shortcuts).
 - `document` — `fileName`, `mimeType`, `sizeBytes`, `purpose` (`KNOWLEDGE`,
-  `CONVERSATION_ATTACHMENT`), `topics[]`, `assistantTopics[]`
-  (output: the subset of `topics` the assistant applied), `summary`,
+  `CONVERSATION_ATTACHMENT`), `concepts[]` (`{concept, scheme, primary,
+  section, confidence, source (RULE, LEXICAL, KNN, LLM, HUMAN), state
+  (SUGGESTED, ACCEPTED), evidence {quote}, reviewer, reviewTime}`; reads omit
+  REJECTED), `issuance` (`{issuer, campus, number, issueDate, effectiveDate,
+  supersedes[]}`), `applicability` (`{level (INSTITUTION, UNIT, PROGRAM,
+  COHORT), units[], programs[], cohorts[]}`), `summary`,
   `languageCode`, `owner` (member), and output `contentState` (`PENDING`,
   `AVAILABLE`, `FAILED`; derived: `AVAILABLE` once a current revision exists,
   `FAILED` when the upload failed, else `PENDING`), `publicationState` (`PUBLISHED`, `UNPUBLISHED`),
@@ -475,9 +490,9 @@ collection, and it is `PUBLISHED` (or the caller holds `items.update` there).
 | CreateItem | `POST …/items` (`requestId`) → documents return `PENDING` + signed `uploadUri` and the `itemType` of the declared MIME type and file name; collections are `STANDARD`; `POST /upload/api/v1/workspaces/{workspace}/items` multipart for one-call upload | `items.create` on `parentItem` (on the workspace for a root collection). Documents only under collections; new documents are `PUBLISHED`; non-editors contribute instead |
 | CompleteItemUpload | `POST …/items/{item}:completeUpload` (validates the stored object; content of another file class than `itemType` fails the upload: `contentState FAILED`, error code `ITEM_TYPE_MISMATCH`) | creator |
 | GetItem | `GET …/items/{item}` (`view`), `?alt=media` → 302 to the signed original | `items.get` |
-| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `spaces:` (items a space holds as materials: pinned items and everything under pinned collections), `itemKind`, `itemType`, `displayName`, `document.*` (MIME type, language code, topics, assistant topics, owner, summary, purpose, states, collection kind, origin, verification, quality issues); presence `field:*` (a repeated field has a value, any other is set: `NOT document.topics:*` = without a topic, `NOT document.summary:*` = without a summary); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
-| SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets and content `references` (blocks of the Structured Document: `refs`, `quote`, `location`), permission-filtered facets (value facets, and `intervals` buckets for `updateTime`) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL. A text search (`query`, `relatedItem`) waits at most `BOMESH_SEARCH_DEADLINE_SECONDS` (default 8 s) for the query embedding and the index together; past it, or when either fails → `UNAVAILABLE` (503) reason `SEARCH_UNAVAILABLE` (retryable). A search matching nothing returns empty facets except disjunctive ones whose own clause matched nothing |
-| UpdateItem | `PATCH` — `displayName`, collection settings, document metadata; `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
+| ListItems | `GET …/items` — `filter` over `name` (batch read: `name = "…/items/a" OR name = "…/items/b"`; names the caller cannot read, or that do not exist, are simply absent, as GetItem would deny them), `parentItem` (`""` = roots), `ancestors:` (subtree), `spaces:` (items a space holds as materials: pinned items and everything under pinned collections), `itemKind`, `itemType`, `displayName`, `document.*` (MIME type, language code, concepts and suggested concepts (concept or scheme names), uncertain schemes, issuer, applicability units and programs, owner, summary, purpose, states, collection kind, origin, verification, quality issues); presence `field:*` (a repeated field has a value, any other is set: `NOT document.concepts:*` = without an accepted concept, `NOT document.summary:*` = without a summary); `orderBy`; `showDeleted`; `showLocked` | `items.list` (visible items only) |
+| SearchItems | `POST …/items:search` `{query, filter, facetSpecs[], orderBy, relatedItem, contentSearchSpec, pageSize, pageToken}` → documents with snippets and content `references` (blocks of the Structured Document: `refs`, `quote`, `location`), permission-filtered facets (value facets, `prefixes` per scheme for `document.concepts`, and `intervals` buckets for `updateTime`), and `interpretation` (concepts the query mapped to, ambiguities, results grouped per option; see below) | `items.search`. The one catalog and retrieval search; hits are re-authorized in PostgreSQL. A text search (`query`, `relatedItem`) waits at most `BOMESH_SEARCH_DEADLINE_SECONDS` (default 8 s) for the query embedding and the index together; past it, or when either fails → `UNAVAILABLE` (503) reason `SEARCH_UNAVAILABLE` (retryable). A search matching nothing returns empty facets except disjunctive ones whose own clause matched nothing |
+| UpdateItem | `PATCH` — `displayName`, collection settings, document metadata (`document.concepts` sets a document's whole-document concepts: listed → ACCEPTED, reviewed by the caller (machine assignments keep their source, new ones are HUMAN), unlisted → REJECTED; `document.issuance`, `document.applicability` replace the field and are never overwritten by extraction afterwards); `collection.inheritAccess` also needs `items.setIamPolicy` | `items.update` |
 | DeleteItem / UndeleteItem | `DELETE` (`force` for a non-empty collection; the live subtree is deleted together) / `POST …:undelete` (restores that cohort and its search visibility; 30-day retention). DELETED items are shown only to `items.undelete` holders and never serve content | `items.delete` / `.undelete` on every access boundary in the cohort (`SUBTREE_HAS_FOREIGN_BOUNDARY`); personal collections cannot be deleted |
 | MoveItem | `POST …:move` `{destinationParent, etag}` | `items.move` + `items.create` on the destination; crossing an access boundary also needs `items.setIamPolicy` on the source boundary; not for source-managed items, candidates of open contributions (`CONTRIBUTION_OPEN`), conversation attachments, personal collections, or into another member's personal collection |
 | ImportCollections | `POST …/items/{item}:importCollections` `{rows[] {path[], description?}, validateOnly}` — creates the missing folders of a folder tree under this COLLECTION in one transaction (MERGE only: nothing existing is renamed, moved, re-described or deleted); each row names a folder by display names from `{item}` down (≤ 1000 rows, ≤ 8 segments of 1–512 characters), a segment matches a readable live child collection case- and whitespace-insensitive (an unreadable folder is absent), missing segments are created parents first like CreateItem folders (`inheritAccess` true) → `{created[] {item, path[], row}, unchangedCount, skippedRows[{row, reason}]}`; a row that cannot apply (bad name, too deep, listed twice, ambiguous name, under a skipped folder, no `items.create` there) is skipped with a fixed English reason and never applied half-way. The client parses the JSON file; no `requestId` (re-running is a no-op by matching) | `items.create` on `{item}`, plus `items.create` on an existing descendant with its own access a new folder goes under (else that row is skipped) |
@@ -508,14 +523,54 @@ value each, in request order, with `interval` instead of `value`. `spaces`
 counts documents per live space holding them (as the `spaces:` filter); values
 are space IDs with the space's display name.
 
-Topics are a two-level taxonomy (DOMAIN → TOPIC), and `document.topics`
-is hierarchical in both the filter and the facet, like `ancestors:` for
-collections: `document.topics:"…/topics/{domain}"` matches documents tagged
-with the domain or with any topic under it, and the domain's facet value
-counts those documents once. A TOPIC has no children, so it matches only
-its own tags. Every consumer of the filter (Browse, saved searches, ListItems,
-Manage) wants the domain's documents; agent retrieval does not filter by
-topic.
+`document.concepts` is hierarchical in both the filter and the facet, like
+`ancestors:` for collections: `document.concepts:"…/concepts/{c}"` matches
+documents with an ACCEPTED assignment of `c` or of any concept under it in the
+published hierarchy (the closure of the published version; poly-hierarchy
+counts a document once). Each restriction is one such condition; clients
+compose them with AIP-160 (OR within a scheme, AND across schemes:
+`(document.concepts:"…/a" OR document.concepts:"…/b") AND
+document.concepts:"…/c"`). A scheme name instead of a concept,
+`document.concepts:"…/conceptSchemes/{s}"`, matches documents with any
+ACCEPTED whole-document concept of scheme `s` (`NOT` = not yet labeled in
+`s`), so a view never enumerates a scheme's concepts. `document.suggestedConcepts:`
+is the same over SUGGESTED assignments (Studio's review queue).
+`document.uncertainSchemes:"…/conceptSchemes/{s}"` matches documents the
+classifier left uncertain in `s` (the unclassified pool; `:*` = in any scheme);
+its facet counts documents per scheme. The facets of both take
+`prefixes[]` (scheme names, Vertex AI Search `FacetKey.prefixes`): one facet
+per scheme; with `excludedFromFilter` a facet ignores only the restrictions
+naming concepts of its own schemes (without `prefixes`, every restriction on
+its field). Values are concept names with the current prefLabel as
+`displayName`. `prefixes` on another field, or naming no scheme of the
+workspace, is INVALID_ARGUMENT. `document.issuance.issuer` (`=`/`!=`) and
+`document.applicability.units:` / `.programs:` (hierarchical in their
+authority schemes, `:*` allowed) filter on document metadata.
+
+Search and agent retrieval never filter by concept unless the caller sets
+that filter. A text search maps the query to published concepts
+(`interpretation.concepts`: labels, diacritic-free forms, `queryExpansion`
+groups; one entry per concept), boosts the documents assigned them and adds a
+recall pass over those documents (readable, at most 5,000), merged by rank
+fusion (RRF, k = 60) and scaled by 1 + 0.5 × the share of the reading's schemes
+a document matches. A label several
+schemes share is read deterministically: a scheme another query term already
+settles excludes its reading; a subject term without a document type prefers
+the document type; otherwise it is an ambiguity with at most 3 options (in
+scheme tab order; `displayName` "scheme: concepts", `filter` the option's
+concepts ORed) whose results come back as `interpretation.groups` (first page
+only, at most 5 each, same filter and visibility: a group holds only documents
+with an accepted label on one of its option's concepts or under them). `interpretation` is omitted
+when the query names no concept; only the caller's own query text is read. A member's `affiliation`
+boosts documents applying to their program, unit or cohort (× 1.3); a
+document explicitly scoped to other units or programs (set by a person, or
+extracted with confidence ≥ 0.9) is left out unless the query names them, and
+institution-wide or unscoped documents are always kept. When the query's
+document type is time-sensitive, recent documents rank first (× 1 + ½^(age /
+90 days)); superseded documents rank lower (× 0.5) unless the query asks for
+history. `knowledge_search`
+applies the same interpretation and returns the groups with the reading it
+used (`conversation_loop.md`).
 
 Asking for access is `CreateRequest` with `kind: COLLECTION_ACCESS`.
 Reviewers of an open contribution may `GetItem`, `GetItemPreview`,
@@ -542,7 +597,7 @@ assistant suggest), `replacesItem` (`NEW_REVISION`), `contributor`, `source`,
 | CreateContribution | `POST …/contributions` (`requestId`) — puts a personal document up for review without copying it | `contributions.create` |
 | GetContribution / ListContributions | `GET` (`view`) / `GET` — `filter` `name` (batch read), `state`, `targetCollection`, `contributor = "workspaces/w/members/me"`, `flags`, `kind`, `origin`, `source`, `item` (batch: the contributions of a page of documents), `itemDisplayName` (wildcards), `itemIndexingState` (Review = open AND (`kind = NEW_REVISION` OR the candidate SUCCEEDED, OUTDATED or UNSUPPORTED)) | contributor; reviewers (`contributions.review` on the target collection) |
 | DeleteContribution | `DELETE` (`REJECTED`/`WITHDRAWN` only) | contributor |
-| ApproveContribution | `POST …:approve` `{targetCollection, topics[], summary, title, recordCorrection}` — moves the candidate into the collection and publishes it (source candidates are published in place; `NEW_REVISION` appends a revision to `replacesItem`); `title` renames the published document (`displayName`; `fileName` unchanged; usually the assistant's `suggestions.title`); `recordCorrection` records a TopicCorrection when `topics` differ from the suggested ones. A NEW_DOCUMENT candidate must be processed first (`indexingState` SUCCEEDED, OUTDATED or UNSUPPORTED, else `CANDIDATE_NOT_PROCESSED`): processing comes before review. A NEW_REVISION candidate of another file class than `replacesItem` → `ITEM_TYPE_MISMATCH` (also at create). **Never starts an ingestion run** | `contributions.review` and `items.publish` on the target collection |
+| ApproveContribution | `POST …:approve` `{targetCollection, concepts[], summary, title}` — moves the candidate into the collection and publishes it (source candidates are published in place; `NEW_REVISION` appends a revision to `replacesItem`); `title` renames the published document (`displayName`; `fileName` unchanged; usually the assistant's `suggestions.title`); `concepts` become the published document's ACCEPTED assignments of their schemes (the first of each scheme is primary). A NEW_DOCUMENT candidate must be processed first (`indexingState` SUCCEEDED, OUTDATED or UNSUPPORTED, else `CANDIDATE_NOT_PROCESSED`): processing comes before review. A NEW_REVISION candidate of another file class than `replacesItem` → `ITEM_TYPE_MISMATCH` (also at create). **Never starts an ingestion run** | `contributions.review` and `items.publish` on the target collection |
 | RequestContributionChanges | `POST …:requestChanges` `{message}` | `contributions.review` |
 | RejectContribution | `POST …:reject` `{message}` | `contributions.review` |
 | WithdrawContribution | `POST …:withdraw` | contributor (`MEMBER` origin) |
@@ -552,55 +607,115 @@ Sources with `publishingPolicy: REVIEW_FIRST` open `SOURCE` contributions for
 new files and `NEW_REVISION` ones for changed published files; the published
 revision keeps answering until approval.
 
-**Topic** `…/topics/{topic}` — `displayName`, `description`, `kind`
-(`DOMAIN`, `TOPIC`), `parentTopic` (topics only), `icon` (an icon name
-`^[a-z][a-z0-9-]{0,63}$`; a TOPIC without one shows its domain's), `color`
-(`#RRGGBB`, case-insensitive, stored lowercase; set on domains, whose topics
-show it) — a malformed `icon`/`color` is INVALID_ARGUMENT on that field and
-empty clears it — `state`
-(`PROPOSED`, `ACTIVE`, `REJECTED`, `DELETED`), `evidence[]` (output:
-contributions that proposed it, filtered to the caller), `documentCount`
-(readable published, output), `inReviewCount` (reviewers only; a DOMAIN's
-counts take each document or contribution tagged with it or any of its
-topics once), and the
-classification signals of a TOPIC: `keywords[]`, `synonyms[]`, `guidance`
-(for the assistant), `examples[]` (≤ 5 readable documents; reads show the
-visible ones) and `rules[]` (`{collection}` subtree or `{source}`). CLASSIFYING
-(`document_contract.md` "Processing") checks the rules first: a document a
-rule matches gets exactly the matching rules' topics and the model is not
-called; otherwise the model reads every candidate with its signals and
-example titles. There is no confidence threshold. ListTopics `view` BASIC
-(the default) omits the Studio fields — the signals, `evidence[]` and
-`inReviewCount` — so pickers, filters and chips read names, kinds, colours and
-`documentCount` only; Studio asks for FULL, which GetTopic always returns.
+**ConceptScheme** `…/conceptSchemes/{conceptScheme}` (platform templates:
+`conceptSchemes/{conceptScheme}`) — one taxonomy axis (skos:ConceptScheme):
+`displayName`, `description`, `purpose` (`CLASSIFICATION` labels documents;
+`AUTHORITY` — org units, programs, campuses — is referenced by document
+metadata and member affiliations, never assigned), `position` (tab order; the
+lowest classification scheme feeds Home), `cardinality {min, max, primary}`,
+`maxDepth`, `assignTopConcepts`, `sectionAssignments`, `llmPolicy` (`ALWAYS`,
+`FALLBACK`, `NEVER`), `autoThreshold` (≥ → ACCEPTED), `reviewThreshold` (≥ →
+SUGGESTED; below: not recorded, the document stays in the scheme's
+unclassified pool), `template` (fork source), output `templateVersion`,
+`publishedVersion`, `unpublishedChanges`, `etag`. Schemes are data of the
+workspace: the university template brings domain, function, document-type
+and audience schemes plus org-unit and program authorities; an enterprise
+workspace may hold a single `subject` scheme. Behaviour comes from the
+settings, never from scheme codes.
+
+Concepts, groups and settings form a **working copy**; `:publish` validates
+it (blocking I1–I8, warnings W1/W3/W4: `item_model.md` "Taxonomy") and writes
+an immutable **ConceptSchemeVersion** `…/versions/{version}` (`publishTime`,
+`publisher`, `conceptCount`, `changes[] {kind (ADDED, RELABELED, REDEFINED,
+MOVED, DEPRECATED, THRESHOLDS, SETTINGS, GROUPS), concept, group,
+replacedBy[]}`, `warnings[]`, `reclassification {remappedCount, rerank[],
+rerunParents[], patternsChanged[], thresholdsChanged, state, runs[]}`), rebuilds the hierarchy
+closure and remaps merged concepts, all in one transaction. Machines
+(classification, query mapping, filters and facets) read only published
+versions; people see a concept's current labels at once. Reclassification
+follows the diff and touches only the affected documents:
+
+| Change | Reclassification | Model |
+| --- | --- | --- |
+| Relabel, redefine (other than `matchPatterns`), move, settings, groups | none (a move only rebuilds the closure) | no |
+| Merge `A → B` (one `replacedBy`) | assignments of A remapped to B in the publish transaction (`remappedCount`) | no |
+| Split `A → A1, A2` (several `replacedBy`) | documents carrying A reranked among the replacements (`rerank[]`); a human A label gets SUGGESTED rows only | yes, A's documents |
+| New narrower concept under P | documents carrying P reranked among P and its children (`rerunParents[]`) | yes, P's documents |
+| Deprecation without replacement | machine assignments REJECTED (`evidence.reason = deprecated`), and so are the rule rows they implied (`evidence.premise`) unless another live label or a collection/source rule implies them too; documents left without any label of a scheme with `minLabels ≥ 1` rerun that scheme | yes, those documents |
+| Thresholds | machine assignments re-routed by their stored confidence (`thresholdsChanged`); a model pick nothing corroborated is never accepted; the rule rows a re-routed row implied take its state and confidence (rejected with it) | no |
+| ConceptRule create/update/delete | rule assignments re-evaluated on documents matching the old or new condition | no |
+| `matchPatterns` of a concept (`patternsChanged[]`) | in the publish request, like a rule change: documents whose current label of the scheme came from a pattern or rule, or whose title, number or first heading (their leading indexed chunks) an old or new pattern of a changed concept matches, get the scheme's pattern labels re-evaluated (one match settles the scheme, replacing its machine rows when that settles it; otherwise stale pattern rows are removed), then their `implies` rule rows and outcomes | no |
+
+After commit the model-bound part becomes `CLASSIFY_ONLY` ingestion runs
+(`trigger` TAXONOMY, at most 1000 documents each, `runs[]`); `state` is
+PENDING until scheduled, RUNNING while runs are open, then DONE. A scheme's
+first version classifies nothing by itself: existing documents are labelled by
+an explicit `CLASSIFY_ONLY` run. Every change handled without the model also
+recomputes the documents' classification outcome for each scheme it touched,
+implied schemes included: `ASSIGNED` with the highest live label confidence
+(a rule 1.0), `UNCERTAIN` once an assigned scheme has no live label left
+(`EMPTY`, `UNCERTAIN`, `FAILED` stay), at the scheme's published version.
+
+**Concept** `…/conceptSchemes/{conceptScheme}/concepts/{concept}` (ID = the
+notation: immutable, never reused in the scheme) — `prefLabels[]`,
+`altLabels[]`, `hiddenLabels[]` (`{languageCode, text}`; compared normalized:
+NFC, case and spacing folded, diacritics kept), `definition` and a `vi`
+prefLabel (required to publish), `scopeNote`, `examples[]` (≤ 5),
+`broader[]` (several = poly-hierarchy), `related[]`, `mappings[] {system,
+code, label, match}`, `matchPatterns[]` (≤ 20 RE2-compatible patterns),
+`timeSensitive`, `color` (top concepts; narrower ones inherit it), `icon`,
+output `displayName`, `state` (`DRAFT`, `PUBLISHED`, `DEPRECATED`, `DELETED`),
+`deprecationPending`, `replacedBy[]`, `groups[]`, `templateConcept`,
+`firstVersion`, `deprecatedVersion`, `documentCount` and `inReviewCount`
+(readable documents with an ACCEPTED / SUGGESTED assignment of it or of a
+concept under it). **ConceptGroup** `…/groups/{group}` (skos:Collection:
+`displayName`, `position`, `members[]`, `queryExpansion`) groups concepts for
+display and query expansion and is never a classification target.
 
 | Method | HTTP | Permission |
 | --- | --- | --- |
-| CreateTopic | `POST` (admins create `ACTIVE` topics; the assistant creates `PROPOSED` ones) | `topics.create` |
-| GetTopic / ListTopics | `GET` / `GET` (`view`) — `filter` `state`, `kind`, `parentTopic` | `topics.get` / `topics.list`; `PROPOSED` and `REJECTED` topics only for `topics.accept` holders |
-| UpdateTopic | `PATCH` | `topics.update` |
-| DeleteTopic / UndeleteTopic | `DELETE` (only when unused) / `:undelete` | `topics.delete` |
-| AcceptTopic | `POST …:accept` `{parentTopic, displayName?}` — tags the contributions that proposed it | `topics.accept` |
-| RejectTopic | `POST …:reject` | `topics.accept` |
-| MergeTopic | `POST …:merge` `{targetTopic}` — retags documents and contributions | `topics.update` |
-| ConfirmTopicAssignments | `POST …/topics/{topic}:confirmAssignments` `{filter}` — the topic's assistant-applied assignments on the documents the ListItems `filter` matches become the caller's (one statement); returns `confirmedCount`. The filter silently narrows to visible documents whose governing collection grants the caller `items.update` | `items.update` (per governing collection) |
-| ImportTopics | `POST …/topics:import` `{rows[] {domain, topic?, name?, description, keywords[], synonyms[], guidance}, mode (MERGE, REPLACE), validateOnly}` — rows name domains and topics by display name (a row without `topic` describes its domain; a missing domain is created; a topic matches by name within its domain, else is created with a server ID; `name` (resource name) from an export matches the topic itself so renames and moves apply) → `{created[], updated[], archived[], unchangedCount, skippedRows[{row, reason}]}` in one transaction, each change `{topic, kind, displayName, domain, row, changes[], previousDisplayName}` so clients show names, not IDs; absent row fields stay unchanged; REPLACE archives unused ACTIVE topics no row matched. Topic IDs are internal: clients show names, never IDs. The client parses CSV/XLSX and exports from ListTopics | `topics.update`, plus `topics.create` to create and `topics.delete` to archive |
-| TestTopicClassification | `POST …/topics:testClassification` `{title, text, collection?, source?, topics[]?}` (`topics` = unsaved changes to existing topics) → `{results[] {topic, reason (RULE, ASSISTANT)}, summary}`: rule hits, else the model's picks, exactly as CLASSIFYING; nothing is stored | `topics.update` |
-| CompileTopicClassificationPrompt | `GET …/topics:compileClassificationPrompt` → `{prompt, rules[], estimatedTokens}`: the `document_profile` prompt with every ACTIVE topic and placeholders — the prefix every document of a run shares (instructions, note, the taxonomy by domain with `T1..Tn` labels; prompt-cached), then one document's part (keyword matches, title, excerpt) (`document_contract.md` "Processing"); no model call | `topics.update` |
+| CreateConceptScheme | `POST …/conceptSchemes` (`conceptSchemeId`, `requestId`); `template` = fork: the template's settings and latest version are copied into the working copy as DRAFT concepts keeping `templateConcept` | `conceptSchemes.create` |
+| Get/List/UpdateConceptScheme | standard; `filter` `purpose`, `displayName`; `purpose` and `template` immutable | `conceptSchemes.get` / `.list` / `.update` |
+| PublishConceptScheme | `POST …:publish {etag, validateOnly}` → Operation (`PublishConceptSchemeMetadata`, response ConceptSchemeVersion; done within the request). Violations → `FAILED_PRECONDITION` `TAXONOMY_INVALID`; nothing to publish → `NO_CHANGES`; `validateOnly` returns an unstored done Operation whose version preview carries `violations[]` | `conceptSchemes.publish` |
+| ImportConcepts | `POST …:importConcepts {rows[] {notation, broader, related, prefVi, prefEn, altVi, altEn, hidden, definition, scopeNote, examples, color, icon, matchPatterns, timeSensitive, mappings}, validateOnly}` — CSV cells as strings (`\|`-separated lists, mappings `system:code:match`); MERGE by notation; absent column unchanged, empty clears; one transaction; any bad row → INVALID_ARGUMENT with a violation per field (`rows[3].broader`) → `{created[], updated[], unchangedCount}` | `concepts.update` (+ `concepts.create` to create) |
+| DiffConceptSchemeTemplate / ApplyConceptSchemeTemplateChanges | `GET …:diffTemplate` → `{template, fromVersion, toVersion, changes[] {key, kind (ADD_CONCEPT, UPDATE_CONCEPT, DEPRECATE_CONCEPT, UPDATE_SCHEME), concept, field, baseValue, templateValue, currentValue, replacedBy[], conflict}}` (three-way: taken template version, latest template version, the fork's working copy; groups are not diffed) / `POST …:applyTemplateChanges {changes[] (keys), etag}` — applies the selected non-conflicting changes, declines the rest and records the latest `templateVersion`; the fork's own edits are never overwritten | `conceptSchemes.update` |
+| TestClassification / CompileClassificationPrompt | `POST …/conceptSchemes:testClassification {title, text, collection?, source?}` → `{assignments[], outcomes[] {scheme, outcome (ASSIGNED, EMPTY, UNCERTAIN, FAILED), confidence}, candidates[] {scheme, concept, score, signals[]}, issuance, applicability, summary, modelCalled}`, nothing stored / `GET …/conceptSchemes:compileClassificationPrompt` → `{prompt, rules[], estimatedTokens}`, no model call (`document_contract.md` "Processing") | `conceptSchemes.update` |
+| Create/Get/List/Update/DeleteConcept | standard (`conceptId` = notation); List `filter` `state`, `broader:` (`NOT broader:*` = top concepts), `notation`, `orderBy` `notation`, `documentCount`, `showDeleted`; Delete only a never-published DRAFT nothing references (tombstone; notation stays reserved) | `concepts.*` |
+| DeprecateConcept | `POST …/concepts/{c}:deprecate {replacedBy[], etag}` — takes effect at the next publish: one replacement = merge (assignments remapped in SQL), several = split (rerank among them on the old concept's documents); a concept with live narrower concepts → `FAILED_PRECONDITION` | `concepts.update` |
+| ConfirmConceptAssignments / RejectConceptAssignments | `POST …/concepts/{c}:confirmAssignments {filter}` → `{confirmedCount}` (SUGGESTED → ACCEPTED, skipping documents at `cardinality.max`) / `:rejectAssignments {filter}` → `{rejectedCount}` (machine assignments → REJECTED); one statement; `filter` (ListItems) silently narrows to readable documents whose governing collection grants the caller `items.update` | `items.update` (per governing collection) |
+| Create/Get/List/Update/DeleteConceptGroup | standard (`groupId`) | `conceptSchemes.update` / `.get` |
+| Get/ListConceptSchemeVersions / ExportConceptSchemeVersion | `GET …/versions[/{version}]` (newest first) / `GET …/versions/{v}:export?format=TURTLE\|JSON_LD` → `{format, mimeType, content}`: SKOS (ConceptScheme, Concept with prefLabel/altLabel/hiddenLabel by language, notation, broader/narrower/related, definition, scopeNote, example, exact/close/broad/narrowMatch, isReplacedBy, Collection) | `conceptSchemes.get` |
+| ListSharedLabels | `GET …/sharedLabels` — normalized labels held by several concepts: across published schemes (W2, valid; queries read them by context) and within one scheme of the working copy (W1 warning) → `{label, crossScheme, concepts[] {concept, scheme, kind, languageCode, text}}`; `filter` `crossScheme`, `scheme` | `conceptSchemes.get` |
 
-**TopicCorrection** `…/topicCorrections/{topicCorrection}` (output only) —
-`item` and `itemDisplayName` (only when the caller can see the document),
-`fromTopics[]` (the assistant's topics the person removed), `toTopics[]` (the
-topics the person chose that the assistant had not), `actor`, `state`
-(`OPEN`, `DISMISSED`: whether it was dismissed), `createTime`. Created by ApproveContribution with
-`recordCorrection` when the approved topics differ from the suggested ones,
-and by UpdateItem `document.topics` when it replaces assistant-applied topics.
-Aggregating shared title phrases into keyword suggestions stays in the client.
+Platform templates have the same scheme, concept, group, version and publish
+methods under `conceptSchemes/…` (operation IDs `…Template…`), guarded by the
+same permissions held on the platform (`platformAdmin` writes,
+`platformOperator` reads); members holding `conceptSchemes.get`/`.list` in any
+workspace read them to fork. A platform grant never reaches a workspace's
+taxonomy. Publishing a template never reclassifies; forks take its new
+version through DiffConceptSchemeTemplate. CreateWorkspace forks nothing,
+whatever its `template`: the workspace's administrator forks the templates it
+wants (CreateConceptScheme with `template`) and publishes them.
 
-| Method | HTTP | Permission |
-| --- | --- | --- |
-| GetTopicCorrection / ListTopicCorrections | `GET` — newest first; `filter` `state`, `toTopics:` | `topics.update` |
-| DismissTopicCorrection | `POST …:dismiss` (`OPEN` → `DISMISSED`; idempotent) | `topics.update` |
+**ConceptRule** `workspaces/{workspace}/conceptRules/{conceptRule}` — `when
+{concept | collection | source}` (exactly one), `then` (a classification
+concept), `effect` (`IMPLIES`: settles `then`, no model for it; `PRIOR` with
+`weight`: a weighted candidate spread over `then` and its narrower concepts),
+output `creator`, `createTime`, `etag`. Rules are not versioned; every change
+is audited and, after commit, re-evaluates the rule-derived assignments of the
+documents the old or new condition matches (no model call). CRUD;
+`conceptRules.*`.
+
+**ConceptProposal** `workspaces/{workspace}/conceptProposals/{conceptProposal}`
+(output only) — `scheme`, `kind` (`NEW_CONCEPT`, `LABEL`), `displayName`,
+`definition`, `suggestedBroader`, `targetConcept` (LABEL), `origin`
+(`CLUSTER`, `CORRECTION`, `MEMBER`), `state` (`OPEN`, `ACCEPTED`,
+`REJECTED`), `concept` (the DRAFT accepting created), `evidence[]` (readable
+documents only), `decider`, `decideTime`. The classifier never creates
+concepts. List/Get (`conceptProposals.list`/`.get`); `:accept {conceptId,
+concept, labelKind, languageCode}` creates a DRAFT concept (NEW_CONCEPT) or
+adds an alt/hidden label to `targetConcept` (LABEL); `:reject`
+(`conceptProposals.decide`).
 
 Contribution flags reveal a `DUPLICATE` and its `relatedItem` to the
 contributor only when they can read it; `SearchItems.relatedItem` needs
@@ -621,7 +736,7 @@ contributor only when they can read it; `SearchItems.relatedItem` needs
   (dismiss, soft)/`:undelete`; `POST …/notifications:markRead` (`filter`)
   marks many. Created only for things the member may read.
 - ◇ `home`: output only — counts, suggested questions (role-aware, from the
-  assistant), topic domains with counts, root collections (incl. `LOCKED`),
+  assistant), featured concepts (top concepts of the first classification scheme) with counts, root collections (incl. `LOCKED`),
   featured (popular readable documents), recently published,
   recommended (with `reason`), continue (recent items, own contributions,
   review queue count, up next). `Member.personalCollection` names "My files".
@@ -686,16 +801,17 @@ appended (the current revision stays) and is reported in `failures[]`.
 **IngestionRun** `…/ingestionRuns/{ingestionRun}` — the only way documents
 are processed. `selector {items[] ≤ 1000, filter}`: explicit documents
 and/or the AIP-160 document filter of ListItems (`ancestors:`,
-`document.indexingState`, `itemType`, `document.topics:`,
+`document.indexingState`, `itemType`, `document.concepts:`,
 `document.origin.source`, …); both set narrow each other, and the selection
 is resolved once into tasks at creation. "Select all matching" in Documents
 sends the filter the list shows, so there is one filter grammar.
-`classification {topics[] ≤ 50, note ≤ 1000}` (optional, immutable): the
-topics the run's CLASSIFYING step of contextual retrieval may assign (empty =
-every ACTIVE topic; a DOMAIN = its ACTIVE topics, or itself when it has none) and a note it
-reads with each document; the contextualization model picks the topics that
-apply, without a confidence threshold. Assigned topics are assistant-applied
-and never replace a person's (`document_contract.md` "Processing").
+`classification {concepts[] ≤ 50, note ≤ 1000}` (optional, immutable):
+concepts (with the concepts under them) that narrow the candidates of the
+run's CLASSIFYING step (empty = every published concept) and a note it reads
+with each document. `classifyOnly` (optional, immutable): classify again from
+the stored Structured Document and chunks, without re-parsing or re-embedding
+(a publish starts such runs with `trigger` TAXONOMY). Machine assignments never
+replace a person's (`document_contract.md` "Processing").
 `readImages` (optional, immutable, default false): the configured vision
 model reads the text inside every picture of the documents, placed with the
 picture (`document_contract.md` "Formats"); slower and billed per distinct
@@ -891,7 +1007,7 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Join link `/w/:code` (signed out: sign in or sign up, then back) | ListWorkspaces (`filter=visibility = PUBLIC AND code = "…"`; none → "This link doesn't work"), JoinWorkspace; already a member → straight in |
 | Account menu → Leave workspace | LeaveWorkspace (hidden for the last admin) |
 | Open a link `/s/:token` (signed out: sign in or sign up, then back) | ResolveShare, AcceptShare (INVITE), then the target's Get; Request access when `reason = NO_ACCESS` |
-| Home | GetMemberHome (greeting; `starterPrompts`; Getting started from `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` — hiding it is a per-browser preference, not stored; `recommended` with reasons, cards via BatchGetItems; `topicDomains`); ask → CreateConversation + Converse; search → SearchItems |
+| Home | GetMemberHome (greeting; `starterPrompts`; Getting started from `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` — hiding it is a per-browser preference, not stored; `recommended` with reasons, cards via BatchGetItems; `featuredConcepts`); ask → CreateConversation + Converse; search → SearchItems |
 | Knowledge map `/knowledge/map` | ListItems (`itemKind = COLLECTION`, `showLocked`), SearchItems, WorkspaceSettings `branding.mapBackground` |
 | New chat, sidebar Recent | ListConversations (one page of 20, `orderBy=lastMessageTime desc`; `outdatedSources` marks conversations to review — New chat lists those among the same 20), GetMemberHome (`starterPrompts`), ListRecentItems (ask about what you just read) |
 | Living answers | ListMessages (`citations[].outdated`, `updateTime`); Update answer → Converse with `replaceFromMessage` = the answer's question |
@@ -901,7 +1017,7 @@ FAILED, a revision returns it to ACTIVE). **Component** `components/{component}`
 | Reader, document preview | GetItem, GetItemPreview (the Original: the file through one of six representations, processed or not; `?q=` matches and a citation's `highlights` marked there; `?revision=` for a citation of an older revision), ListItemRevisions, SearchItems(`relatedItem`), CreateSavedItem, UpdateRecentItem(`allowMissing`), Converse (attachments) |
 | My library | List saved / recent / saved searches, ListContributions(`contributor=me`), ListItems(`parentItem=` the member's `personalCollection`) |
 | Contribute, contributions, review | CreateItem (personal collection) → CreateContribution; Documents → Processing: CreateIngestionRun (`items[]` = the candidates; refreshes their suggestions); Documents → Review: Approve/RequestChanges/Reject (Withdraw/Resubmit by the contributor); a NEW_REVISION is processed after approval |
-| Manage → Documents (all, quality, topics) | Every view is one server-paged list and every count the same filter with `pageSize=1` (`totalSize`); nothing reads a whole queue. Review = ListContributions (open, candidate processed or a new version); Processing = ListContributions (members' submissions not processed) then ListItems (`document.indexingState` PENDING, RUNNING, FAILED, OUTDATED); All and Quality = ListItems(`filter`) with the page's contributions read by `item`; Topics to confirm = one SearchItems `document.assistantTopics` facet (each group's documents read when shown); Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun, Topics methods (ListTopics `view=FULL` for the editor, its counts server-side; every other surface reads the BASIC default) |
+| Manage → Documents (all, quality, taxonomy) | Every view is one server-paged list and every count the same filter with `pageSize=1` (`totalSize`); nothing reads a whole queue. Review = ListContributions (open, candidate processed or a new version); Processing = ListContributions (members' submissions not processed) then ListItems (`document.indexingState` PENDING, RUNNING, FAILED, OUTDATED); All and Quality = ListItems(`filter`) with the page's contributions read by `item`; Suggestions to review = one SearchItems `document.suggestedConcepts` facet per scheme (each concept's documents read when shown; Confirm/RejectConceptAssignments act on a whole concept); Publish/Unpublish/Verify/Merge/Delete/Undelete, CreateIngestionRun; Studio › Classification: ConceptScheme, Concept, ConceptGroup, ConceptRule and ConceptProposal methods, ListSharedLabels, PublishConceptScheme (`validateOnly` for the publish dialog) |
 | Knowledge bases, access, request access, copy link | Item methods on root collections, Get/SetItemIamPolicy, CreateRequest(`COLLECTION_ACCESS`), CreateShare (SHARE of a document, collection or space; INVITE to a collection) |
 | Inbox | The bell reads only the unread count (ListNotifications `filter="read=false"`, `pageSize=1` → `totalSize`); opening the inbox lists 30 at a time, newest first; UpdateNotification, MarkNotificationsRead, DeleteNotification/Undelete, request and contribution methods |
 | Chat, conversations, files, share, feedback | Conversation, ConverseConversation, Messages, SubmitMessageFeedback, conversations shared live through a Share (re-filtered for each reader on every read: a turn citing a source the reader cannot read is withheld, unreadable citations are marked unavailable), Artifacts and revisions, ExportArtifact, PublishArtifact |
@@ -927,13 +1043,13 @@ detail out, and never fakes them in production):
 - **Reader:** PERMISSION_DENIED on GetItem does not name the governing
   collection, so Request access cannot be offered; no method lists the
   conversations that cite an item.
-- **Review and topics:** ApproveContribution cannot publish a submission as a
-  new revision of an existing item; nothing creates `PROPOSED` topics.
+- **Review:** ApproveContribution cannot publish a submission as a new
+  revision of an existing item.
 - **Quality issues:** nothing computes `document.qualityIssues` yet (it is
   always empty) and ListItems does not accept the `document.qualityIssues`
   filter, so Studio's Possible duplicates list stays empty and is not counted.
   Re-verification and Missing details use `document.verification.state`,
-  `document.topics:*`, `document.owner:*` and `document.summary:*`.
+  `document.concepts:*`, `document.owner:*` and `document.summary:*`.
 - **Workspace admin:** AuditEvent carries no sign-in method or device;
   WorkspaceAssistant has no citations setting; a denied request cannot be
   reopened (no Undo).

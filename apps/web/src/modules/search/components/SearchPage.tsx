@@ -10,12 +10,24 @@ import { resourceId } from "@/lib/api/client";
 import { fmtNum, plural, rel } from "@/lib/format";
 import { useMessages } from "@/lib/i18n";
 import { useWorkspace } from "@/lib/workspace";
+import type { SearchItemsResult } from "@/modules/knowledge/api";
 import { BaseMark } from "@/modules/knowledge/bases/components/BaseMark";
 import { HighlightText } from "@/modules/knowledge/components/HighlightText";
+import { ConceptTag } from "@/modules/knowledge/components/ConceptTag";
 import { ResourceList, ResourceRow } from "@/modules/knowledge/components/ResourceRow";
 import { SearchProgress } from "@/modules/knowledge/components/SearchProgress";
 import { openCitation } from "@/modules/knowledge/content/open";
-import { catalogHref, catalogSearchRequest, fold, parseCatalogQuery, plainSnippet, referenceOfResult, snippetOf, tokens } from "@/modules/knowledge/model";
+import {
+  catalogHref,
+  catalogSearchRequest,
+  fold,
+  parseCatalogQuery,
+  plainSnippet,
+  referenceOfResult,
+  snippetOf,
+  tokens,
+  understoodTerms,
+} from "@/modules/knowledge/model";
 import { openDocumentPreview } from "@/modules/knowledge/preview/store";
 import { useKnowledgeBases, useKnowledgeModel, useSearchItems } from "@/modules/knowledge/queries";
 import { originParam } from "@/modules/knowledge/reader/links";
@@ -25,6 +37,8 @@ import { usePeople, useSearchedConversations } from "../queries";
 
 const PER_GROUP = 5;
 const PER_PAGE = 20;
+/** Documents shown per meaning of an ambiguous term. */
+const PER_MEANING = 3;
 
 type GroupId = "docs" | "kbs" | "convs" | "people";
 
@@ -146,11 +160,32 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
   /* Documents: the catalog search (same ranking and access as Browse); the full set is Browse. */
   const request = useMemo(() => catalogSearchRequest(parseCatalogQuery({ q }), ws.id, { facets: false, pageSize: PER_GROUP }), [q, ws.id]);
   const docs = useSearchItems(request);
-  const docRows = useMemo(
-    () => (docs.data?.results ?? []).filter((r) => r.item).map((r) => ({ resource: model.toResource(r.item!), snippet: plainSnippet(snippetOf(r)), match: referenceOfResult(r) })),
-    [docs.data, model],
-  );
-  const docTotal = docs.data ? (docs.data.totalSize ?? docRows.length) : null;
+  /** Search results as Browse's rows; a hit inside a passage opens there, else the document's preview. */
+  const docRows = (results: readonly SearchItemsResult[] | undefined) =>
+    (results ?? []).flatMap((r) => {
+      if (!r.item) return [];
+      const resource = model.toResource(r.item);
+      const match = referenceOfResult(r);
+      return [
+        <ResourceRow
+          key={resource.name}
+          resource={resource}
+          q={q}
+          snippet={plainSnippet(snippetOf(r))}
+          onOpen={() => {
+            const from = originParam({ kind: "search" });
+            if (match) openCitation({ ...match.reference, collection: resource.base?.name }, { from });
+            else openDocumentPreview({ item: resource.name, listed: resource.item, q, from });
+          }}
+        />,
+      ];
+    });
+  const topRows = docRows(docs.data?.results);
+  const docTotal = docs.data ? (docs.data.totalSize ?? topRows.length) : null;
+  // What the search understood (concepts the query names), and — for an ambiguous term — its meanings' first documents.
+  const interp = docs.data?.interpretation;
+  const understood = [...new Set(understoodTerms(interp).flatMap((t) => t.concepts))];
+  const meanings = (interp?.groups ?? []).filter((g) => g.option);
 
   /* The rest: matched locally (accent-insensitive, `fold`) against one read each. */
   const bases = useKnowledgeBases({ showLocked: true });
@@ -198,21 +233,28 @@ function Results({ q, tab, page, setPage, setTab, onClear }: { q: string; tab: s
       error: docs.data ? null : docs.error,
       retry: docs.refetch,
       render: () => (
-        <ResourceList>
-          {docRows.map(({ resource, snippet, match }) => (
-            <ResourceRow
-              key={resource.name}
-              resource={resource}
-              q={q}
-              snippet={snippet}
-              onOpen={() => {
-                const from = originParam({ kind: "search" });
-                if (match) openCitation({ ...match.reference, collection: resource.base?.name }, { from });
-                else openDocumentPreview({ item: resource.name, listed: resource.item, q, from });
-              }}
-            />
-          ))}
-        </ResourceList>
+        <>
+          {understood.length ? (
+            <p className="cat-interp cat-interp--compact">
+              <span className="cat-interp__k">Hiểu là</span>
+              {understood.map((c) => (
+                <ConceptTag key={c} taxonomy={model.taxonomy} concept={c} />
+              ))}
+            </p>
+          ) : null}
+          {meanings.length ? (
+            meanings.map((g) => (
+              <section key={g.option} className="cat-qgroup cat-qgroup--compact" aria-label={g.option}>
+                <h3 className="cat-qgroup__title" translate="no">
+                  {g.option}
+                </h3>
+                <ResourceList>{docRows(g.results).slice(0, PER_MEANING)}</ResourceList>
+              </section>
+            ))
+          ) : (
+            <ResourceList>{topRows}</ResourceList>
+          )}
+        </>
       ),
     },
     listGroup({

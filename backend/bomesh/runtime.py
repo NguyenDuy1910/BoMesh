@@ -58,6 +58,8 @@ from bomesh.services.knowledge_items.original_parser import OriginalParser
 from bomesh.services.knowledge_items.structure_store import StructureStore
 from bomesh.services.previews.engine import PreviewEngine
 from bomesh.services.previews.gotenberg import GotenbergClient
+from bomesh.services.taxonomy.classification import Signals
+from bomesh.services.taxonomy.retrieval import TaxonomySearchRanking
 # [temporal-disabled] from bomesh.services.workflow.service import TemporalWorkflowService
 from bomesh.storage import S3DocumentStorage
 from config import AppConfig, get_config
@@ -368,6 +370,11 @@ class AppRuntime:
                 structures=self.structure_store(),
                 pdfs=self.original_parser(),
                 classifications=StoredClassifications(self.object_storage()),
+                signals=Signals(
+                    sessions=self.sessions(),
+                    index=self.item_index(),
+                    storage=self.object_storage(),
+                ),
             )
         return self._ingestion
 
@@ -474,6 +481,7 @@ class AppRuntime:
                 self.item_index(),
                 access=ItemReadAccess(self.sessions()),
                 reranker=reranker,
+                ranking=TaxonomySearchRanking(self.sessions()),
                 candidate_count=retrieval.hybrid_candidate_limit,
                 reranking_enabled=retrieval.reranking_enabled,
                 rerank_timeout_seconds=retrieval.rerank_timeout_seconds,
@@ -493,6 +501,7 @@ class AppRuntime:
                 KnowledgeSearch(
                     self.knowledge_retriever(),
                     result_limit=retrieval.final_top_k,
+                    context_chunks=retrieval.context_chunks,
                     max_context_characters=retrieval.context_characters,
                     tracer=tracer,
                 )

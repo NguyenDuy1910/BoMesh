@@ -16,7 +16,7 @@
 .lib-ctb__desc { display: flex; align-items: center; gap: 0 6px; min-width: 0; }
 .lib-ctb__kb { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Knowledge base header: owner unit and topics (knowledge.js) */
+/* Knowledge base header: owner unit and usual concepts (knowledge.js) */
 .kb-head__meta { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 6px; }
 
 @container app (max-width: 760px) {

@@ -6,25 +6,32 @@ means the same thing in ListItems, SearchItems and the facets.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import ColumnElement, Text, and_, case, cast, exists, func, or_, select
+from sqlalchemy import ColumnElement, Text, and_, case, cast, func, select
 from sqlalchemy.orm import aliased
 
 from bomesh.db.models import (
+    Concept,
+    ConceptClosure,
+    ConceptScheme,
+    DocumentApplicability,
+    DocumentProfile,
     ExternalResource,
     IngestionSource,
     Item,
+    ItemClassification,
+    ItemConcept,
     ItemIndexState,
     ItemRevision,
-    ItemTopic,
     SpaceMaterial,
-    Topic,
 )
 from bomesh.iam.policy import PERSONAL_COLLECTION_TYPE
 from bomesh.iam.visibility import below_document_reaching
 from bomesh.services.knowledge_items.item_store import collections_below, in_subtree
+from bomesh.services.taxonomy.ranking import labeled_with
 
 #: ``document.contentState`` (derived: :attr:`Item.content_state`).
 CONTENT_STATE: ColumnElement[Any] = func.upper(Item.content_state)
@@ -154,41 +161,111 @@ def indexing_state_conditions(
     }
 
 
-#: The domain a tag's topic sits under (``document.topics`` is hierarchical).
-_DOMAIN = aliased(Topic)
+@dataclass(frozen=True, slots=True)
+class SchemeValue:
+    """A filter value naming a whole concept scheme (``…/conceptSchemes/{s}``):
+    ``scheme_id`` is its ID or a scalar subquery resolving it."""
+
+    scheme_id: Any
 
 
-def has_topic(code: str) -> ColumnElement[bool]:
-    """``document.topics:"workspaces/w/topics/{code}"``: tagged with the topic or, for a
-    DOMAIN, with any topic under it (like ``ancestors:`` for collections)."""
-    return _tagged_with(code)
-
-
-def has_assistant_topic(code: str) -> ColumnElement[bool]:
-    """``document.assistantTopics:"workspaces/w/topics/{code}"``: :func:`has_topic` over
-    the tags the assistant applied (no person has set or confirmed them)."""
-    return _tagged_with(code, ItemTopic.created_by_user_id.is_(None))
-
-
-def _tagged_with(code: str, *conditions: ColumnElement[bool]) -> ColumnElement[bool]:
-    return exists(
-        select(ItemTopic.item_id)
-        .join(Topic, Topic.id == ItemTopic.topic_id)
-        .outerjoin(_DOMAIN, _DOMAIN.id == Topic.parent_topic_id)
+def scheme_id(workspace_id: UUID, code: str) -> Any:
+    """The ID of the workspace's live scheme ``code`` (scalar subquery)."""
+    return (
+        select(ConceptScheme.id)
         .where(
-            ItemTopic.item_id == Item.id,
-            or_(Topic.code == code, _DOMAIN.code == code),
-            *conditions,
+            ConceptScheme.tenant_id == workspace_id,
+            ConceptScheme.code == code,
+            ConceptScheme.deleted_at.is_(None),
+        )
+        .scalar_subquery()
+    )
+
+
+def _labeled_in(value: Any, state: str) -> ColumnElement[bool]:
+    if isinstance(value, SchemeValue):
+        # A scheme: some whole-document label of that scheme in ``state``.
+        return Item.id.in_(
+            select(ItemConcept.item_id).where(
+                ItemConcept.scheme_id == value.scheme_id,
+                ItemConcept.state == state,
+                ItemConcept.section_ref.is_(None),
+            )
+        )
+    return labeled_with(value, state=state)
+
+
+def has_concept(value: Any) -> ColumnElement[bool]:
+    """``document.concepts:"…/conceptSchemes/{s}/concepts/{c}"``: an ACCEPTED label on the
+    concept or any concept below it (``concept_closure``; poly-hierarchy and section
+    labels included). ``value`` is its ID or a scalar subquery resolving it.
+
+    ``document.concepts:"…/conceptSchemes/{s}"`` (a :class:`SchemeValue`): an ACCEPTED
+    whole-document label of scheme ``s`` (``NOT`` = the scheme is not set)."""
+    return _labeled_in(value, "accepted")
+
+
+def has_suggested_concept(value: Any) -> ColumnElement[bool]:
+    """``document.suggestedConcepts:"…"``: :func:`has_concept` over SUGGESTED labels
+    (the assistant's, nobody confirmed or rejected them)."""
+    return _labeled_in(value, "suggested")
+
+
+def uncertain_in(value: SchemeValue) -> ColumnElement[bool]:
+    """``document.uncertainSchemes:"…/conceptSchemes/{s}"``: the classifier was not sure
+    enough to label the document in ``s`` (``item_classifications.outcome = uncertain``;
+    Studio's unclassified pool)."""
+    return Item.id.in_(
+        select(ItemClassification.item_id).where(
+            ItemClassification.scheme_id == value.scheme_id,
+            ItemClassification.outcome == "uncertain",
         )
     )
 
 
-#: ``document.topics:*``: tagged with at least one topic.
-HAS_TOPICS: ColumnElement[bool] = exists().where(ItemTopic.item_id == Item.id)
-#: ``document.assistantTopics:*``: carries at least one assistant-applied tag.
-HAS_ASSISTANT_TOPICS: ColumnElement[bool] = exists().where(
-    ItemTopic.item_id == Item.id, ItemTopic.created_by_user_id.is_(None)
+#: ``document.uncertainSchemes:*``: uncertain in some scheme.
+HAS_UNCERTAIN_SCHEMES: ColumnElement[bool] = Item.id.in_(
+    select(ItemClassification.item_id).where(ItemClassification.outcome == "uncertain")
 )
+
+
+def _labeled(state: str) -> ColumnElement[bool]:
+    return Item.id.in_(select(ItemConcept.item_id).where(ItemConcept.state == state))
+
+
+#: ``document.concepts:*``: carries at least one accepted label.
+HAS_CONCEPTS: ColumnElement[bool] = _labeled("accepted")
+#: ``document.suggestedConcepts:*``: carries at least one suggested label.
+HAS_SUGGESTED_CONCEPTS: ColumnElement[bool] = _labeled("suggested")
+
+#: ``document.issuance.issuer``: the org-unit concept that issued the document.
+ISSUER: ColumnElement[Any] = (
+    select(DocumentProfile.issuer_concept_id)
+    .where(DocumentProfile.item_id == Item.id)
+    .correlate(Item)
+    .scalar_subquery()
+)
+
+
+def applies_to(concept: Any) -> ColumnElement[bool]:
+    """``document.applicability.units:`` / ``programs:``: the document applies to the
+    concept or a concept below it (``concept_closure`` of its authority scheme)."""
+    return Item.id.in_(
+        select(DocumentApplicability.item_id)
+        .join(ConceptClosure, ConceptClosure.descendant_id == DocumentApplicability.concept_id)
+        .where(ConceptClosure.ancestor_id == concept)
+    )
+
+
+def applies_to_scheme(scheme: str) -> ColumnElement[bool]:
+    """``document.applicability.units:*`` / ``programs:*``: applies to some concept of
+    the authority scheme ``scheme``."""
+    return Item.id.in_(
+        select(DocumentApplicability.item_id)
+        .join(Concept, Concept.id == DocumentApplicability.concept_id)
+        .join(ConceptScheme, ConceptScheme.id == Concept.scheme_id)
+        .where(ConceptScheme.code == scheme)
+    )
 
 
 def has_ancestor(item_id: UUID) -> ColumnElement[bool]:
@@ -218,21 +295,28 @@ def in_space(space_id: Any) -> ColumnElement[bool]:
 
 __all__ = [
     "CONTENT_STATE",
-    "HAS_ASSISTANT_TOPICS",
-    "HAS_TOPICS",
+    "HAS_CONCEPTS",
+    "HAS_SUGGESTED_CONCEPTS",
+    "HAS_UNCERTAIN_SCHEMES",
+    "ISSUER",
     "ITEM_TYPE",
     "LANGUAGE",
     "OWNER_ID",
     "PUBLICATION_STATE",
     "PUBLISH_TIME",
+    "SchemeValue",
     "SOURCE_CODE",
     "SUMMARY",
     "VERIFICATION_STATE",
+    "applies_to",
+    "applies_to_scheme",
     "collection_kind",
     "has_ancestor",
-    "has_assistant_topic",
-    "has_topic",
+    "has_concept",
+    "has_suggested_concept",
     "in_space",
     "indexing_state",
     "indexing_state_conditions",
+    "scheme_id",
+    "uncertain_in",
 ]

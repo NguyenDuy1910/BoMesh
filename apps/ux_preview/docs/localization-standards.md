@@ -17,7 +17,7 @@ The single source of truth for **how BoMesh is localized**: the i18n architectur
 
 1. **Vietnamese first.** BoMesh is built for Vietnamese organizations. Vietnamese is the **default and primary** interface language: copy is *written* in Vietnamese by people who use the product, not translated from English. English is the second language and follows the Vietnamese meaning. A screen is not done until the Vietnamese reads like it was designed in Vietnamese.
 2. **Interface language is a personal preference.** It changes chrome: menus, buttons, labels, messages, tooltips, placeholders, numbers, dates and relative times. New accounts and signed-out pages start in Vietnamese.
-3. **Content keeps the language it was written in**: documents, quotes, citations, assistant answers, suggested questions, user input and workspace-authored names (kho tài liệu, topics, spaces, document titles, custom roles, people).
+3. **Content keeps the language it was written in**: documents, quotes, citations, assistant answers, suggested questions, user input and workspace-authored names (kho tài liệu, concepts and schemes, spaces, document titles, custom roles, people).
 4. **No mixed-language sentence.** A sentence is either fully localized or fully content. English fragments inside a Vietnamese sentence are defects (the most common one today is server text inside a localized template, audit `L-04`).
 5. **Context over strings.** A message is identified by *what it means where it appears* (a semantic key), so the same English word can have different Vietnamese wordings in different places ("Mở" the verb, "Đang mở" the state).
 
@@ -109,7 +109,7 @@ Code-review rules for every new or changed string. Rules 1–8 apply to catalog 
 | 12 | **Accessible names are strings too** (`aria-label`, `title`, `alt`, progress labels) | `label = "Progress"` hard-coded | `m.common.progress` |
 | 13 | **One text node per sentence in JSX.** `{a} of {b}`, `Submitted {rel}` or `to <Link/>` split the text the translator sees | `<span>{v.resubmitted ? "Resubmitted" : "Submitted"} {rel(at)}</span>` | `` <span>{`Submitted ${relInline(at)}`}</span> ``; names stay in their own `translate="no"` element |
 | 14 | **Bare counters are language-neutral**: position and progress counters with no words use `n/m` ("1/3"), never "1 of 3"; ranges with words use a catalog function (`m.common.range`) | `` `${i + 1} of ${n}` `` | `` `${i + 1}/${n}` `` |
-| 15 | **Truncated text has a tooltip**: whatever is cut with an ellipsis (chips, names, card titles) carries its full text in `title`; chips stay one line | A long topic chip wrapping onto two centered lines | `.cur-topic__name` ellipsis + `title={name}` |
+| 15 | **Truncated text has a tooltip**: whatever is cut with an ellipsis (chips, names, card titles) carries its full text in `title`; chips stay one line | A long concept chip wrapping onto two centered lines | `.concept-tag` ellipsis + `title={name}` |
 
 ## 5. Catalog organization
 
@@ -198,7 +198,7 @@ The CI dictionary check (§3.2) verifies, for the glossary's fixed terms, that t
 ## 10. Content guard
 
 - Mark content regions `translate="no"`: answers, user messages, document pages, citation quotes, suggested-question chips, user input fields (already done via `SKIP_SEL`).
-- **Names inside chrome sentences** ("You joined {space}", "Shared by {owner}", "Welcome, {name}") are captured by patterns and translated recursively; a name that equals a dictionary key ("Home", "Browse", "Topics") would be translated. Port the preview's **workspace-names guard** to web: the translator skips a captured value equal to a known workspace record name (collections, spaces, topics, people, workspace) unless it sits in chrome elements whose text is a product label.
+- **Names inside chrome sentences** ("You joined {space}", "Shared by {owner}", "Welcome, {name}") are captured by patterns and translated recursively; a name that equals a dictionary key ("Home", "Browse", "Classification") would be translated. Port the preview's **workspace-names guard** to web: the translator skips a captured value equal to a known workspace record name (collections, spaces, concepts, people, workspace) unless it sits in chrome elements whose text is a product label.
 - Never wrap a placeholder value in `<span translate="no">` inside a sentence: it splits the text node and defeats pattern matching.
 
 ## 11. Fallback and missing translations

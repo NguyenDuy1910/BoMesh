@@ -58,8 +58,8 @@ const CLAIMS = [
   ['Peter Vo', 'Engineering', 'Software', 920, 'Jul 18'], ['Julia Chen', 'Marketing', 'Event booth', 1760, 'Sep 9'], ['Marco Rossi', 'Marketing', 'Airfare', 1450, 'Aug 25'],
   ['Ivy Tran', 'Marketing', 'Hotel', 850, 'Aug 6'], ['Chi Bui', 'People Ops', 'Training', 1150, 'Jul 27'],
 ];
-const TOPICS = [
-  ...CAMPUS_TOPICS,   // UTE's admissions answers (data/campus.js); each applies in UTE only
+const ANSWERS = [
+  ...CAMPUS_ANSWERS,   // UTE's admissions answers (data/campus.js); each applies in UTE only
   { k: /\bmars\b/i, none: true },
   { k: /reimburse|claims?\b/i, from: 'c2' },
   { k: /approval limit|purchase order|\bpo\b|procure/i,
@@ -139,7 +139,7 @@ function recordGap(g) {
 }
 
 /* ═══════════════ Finx answers (Finx Workspace demo content) ═══════════════
-   Topic: { k, when?, text | text(ctx), cites, next?(ctx), gap?, files?, live?(q) }.
+   Answer: { k, when?, text | text(ctx), cites, next?(ctx), gap?, files?, live?(q) }.
    gap: the sources don't settle it — answer honestly, cite what they do say,
    offer who can decide, and record the question as a knowledge gap. */
 const ct = (item, pageNumber, quote) => ({ item, highlights: [{ pageNumber }], quote });
@@ -159,7 +159,7 @@ const FQ = {
   dispute: ct('fx-ops-dispute', 2, 'A cardholder dispute must be acknowledged within 2 business days and resolved within 45 days.'),
   idemHeader: ct('fx-eng-adr031', 1, 'Every POST to a payment API must carry an Idempotency-Key header.'),
   idemReplay: ct('fx-eng-adr031', 2, 'The gateway stores the first response for 24 hours and replays it for any retry with the same key.'),
-  ledger: ct('fx-eng-adr027', 1, 'Ledger balances are updated only by consuming events from the payments topic, never by direct writes.'),
+  ledger: ct('fx-eng-adr027', 1, 'Ledger balances are updated only by consuming events from the payments event stream, never by direct writes.'),
   timeout: ct('fx-pay-runbook', 1, 'If the timeout rate exceeds 2% for 5 minutes, fail over card authorization to the secondary acquirer.'),
   failback: ct('fx-pay-runbook', 2, 'Fail back only after the primary acquirer confirms recovery and its health check has been green for 30 minutes.'),
   mac: ct('fx-data-mau', 1, 'A monthly active customer has at least one customer-initiated financial transaction in the calendar month; logins alone do not count.'),
@@ -206,7 +206,7 @@ function askedLately(q) {
   return { text: parts.length ? parts.join('\n\n') : 'No questions came in this week, and nothing went unanswered.', citations: [],
     activity: [{ kind: 'search', label: 'Checked questions sent to your spaces' }, { kind: 'search', label: 'Checked unanswered questions' }], next, files: false };
 }
-const FINX_TOPICS = [
+const FINX_ANSWERS = [
   { k: /(people|team|staff) (ask|asked)|asked (most|about)|common questions|questions (about|did|people)|confus/i, when: () => isAdmin() || mySpaces().some(s => isSpaceStaff(s)), live: askedLately },
   { k: /(unmasked|pii|personal data|customer data).*(access|need|get|see|query)|(access|need|get|see|query).*(unmasked|pii|personal data|customer data)/i, cites: [FQ.masked, FQ.pii, FQ.piiDays],
     text: ({ p }) => `Customer personal data is **masked by default** in every non-production environment [1], so most analysis doesn’t need special access.\n\nTo see unmasked data you need two things [2]:\n- an **approved PII access request**, and\n- the **Data privacy training**.\n\nThe request goes to Risk & Compliance with the purpose, the tables you need and an end date; access lasts **at most 30 days** [3].` + (p?.trainings ? `\n\nYour profile shows ${p.trainings.includes('Data privacy 2026') ? 'Data privacy 2026 completed, so you can send the request now' : 'no Data privacy training yet — complete it before you send the request'}.` : ''),
@@ -227,7 +227,7 @@ const FINX_TOPICS = [
     text: 'ADR-031 makes retries safe:\n\n- Every **POST to a payment API must carry an Idempotency-Key header** [1]. Clients create one key per payment and reuse it for every retry.\n- The gateway **stores the first response for 24 hours** and replays it for any retry with the same key [2], so a retry never debits the customer twice.',
     next: () => [openDoc('fx-eng-adr031', 'Open ADR-031'), NX.work('draft', 'Draft an ADR from these sources', 'sp-cbm', ['fx-eng-adr031', 'fx-eng-adr027'])] },
   { k: /ledger|adr-?027|event.?driven|kafka|pulsar|\bmsk\b|stream(ing)? platform/i, cites: [FQ.ledger],
-    text: 'ADR-027 sets the rule: **ledger balances are updated only by consuming events from the payments topic, never by direct writes** [1].\n\nThat’s why the streaming platform matters — the CBM team is comparing Confluent Cloud, self-hosted Pulsar and Amazon MSK on throughput, exactly-once support, operations effort, data residency and cost.',
+    text: 'ADR-027 sets the rule: **ledger balances are updated only by consuming events from the payments event stream, never by direct writes** [1].\n\nThat’s why the streaming platform matters — the CBM team is comparing Confluent Cloud, self-hosted Pulsar and Amazon MSK on throughput, exactly-once support, operations effort, data residency and cost.',
     next: () => [(D.works || []).some(w => w.id === 'w-review-stream') && hasModule('work') ? { label: 'Open the streaming evaluation', href: '/work/w-review-stream' } : null, openDoc('fx-eng-adr027', 'Open ADR-027')] },
   { k: /cut.?off|napas|interbank|settle(ment)?|batch transfer|citad/i, cites: [FQ.napas, FQ.batch, FQ.holiday],
     text: '- **NAPAS 247** interbank transfers settle **in real time, 24 hours a day** — there’s no cut-off [1].\n- **Batch transfers** submitted **after 15:30** settle on the **next business day** [2].\n\nDuring Tết and other public holidays only NAPAS 247 and internal transfers run; batches wait for the first business day after the holiday [3].',
@@ -246,10 +246,10 @@ const FINX_TOPICS = [
     next: () => [openDoc('fx-pol-hybrid', 'Open the Hybrid Work Policy')] },
   { k: /\bdue\b|this week|next (7|seven) days|plan my week|coming up|upcoming|what.?s next|my deadlines|deadlines (this|next)/i, live: dueSoon },
 ];
-/** Answer tables by workspace (demo content). Workspaces without one use Northwind's. files:false = no generated spreadsheets/docs unless a topic allows it. */
-const TOPIC_TABLES = { 'ws-finx': { topics: FINX_TOPICS, files: false } };
+/** Answer tables by workspace (demo content). Workspaces without one use Northwind's. files:false = no generated spreadsheets/docs unless an answer allows it. */
+const ANSWER_TABLES = { 'ws-finx': { answers: FINX_ANSWERS, files: false } };
 /* The passages these answers quote are part of their documents' text (documents.js reads this once, at load). */
-(X.quotedSources ??= []).push(() => [TOPICS, FINX_TOPICS]);
+(X.quotedSources ??= []).push(() => [ANSWERS, FINX_ANSWERS]);
 
 /** Keep only lines whose citations survive; renumber the rest. */
 function prune(text, cites, keep) {
@@ -270,8 +270,8 @@ function answer(q, scope = [], fileNames = [], space = null) {
   const readable = visibleKbs().filter(canReadKb);
   const inScope = id => !scope.length || scope.includes(id);
   const lockedExists = visibleKbs().some(k => kbRole(k) === 'none');
-  const table = TOPIC_TABLES[S.ws];
-  const t = (table?.topics || TOPICS).find(x => x.k.test(q) && (!x.when || x.when()));
+  const table = ANSWER_TABLES[S.ws];
+  const t = (table?.answers || ANSWERS).find(x => x.k.test(q) && (!x.when || x.when()));
   if (t?.live) return t.live(q);
   const chat = !fileNames.length && smallTalk(q);
   if (chat) return chat;
@@ -295,8 +295,8 @@ function answer(q, scope = [], fileNames = [], space = null) {
       cites = picks.map(d => { const ch = X.docModel(d).chunks; return ch.find(x => x.kind === 'p') || ch[0]; }).map((ch, i) => ch && ({ n: i + 1, ...X.cite.fromChunk(picks[i], ch) })).filter(Boolean);
     }
   }
-  const topicKbs = [...new Set((cites || []).map(c => docById(c.item)?.kb))];
-  const searched = readable.filter(k => inScope(k.id)).sort((a, b) => (topicKbs.includes(b.id) - topicKbs.includes(a.id)) || (!!a.personal - !!b.personal));
+  const answerKbs = [...new Set((cites || []).map(c => docById(c.item)?.kb))];
+  const searched = readable.filter(k => inScope(k.id)).sort((a, b) => (answerKbs.includes(b.id) - answerKbs.includes(a.id)) || (!!a.personal - !!b.personal));
   const names = searched.map(k => k.name);
   // Named only when the person narrowed the search to one or two collections; never a count.
   const scopeName = scope.length && names.length && names.length <= 2 ? names.join(' and ') : 'your knowledge';
@@ -486,7 +486,7 @@ const STEP_IC = { search: 'search', read: 'file-text', prepare: 'server', code: 
 const LIVE_LABEL = { search: 'Searching your knowledge', read: 'Reading a document', code: 'Running code', prepare: 'Preparing a file', export: 'Saving a file' };
 const THINK = '<span class="chat-think" aria-hidden="true"><i></i><i></i></span>';
 const CARET = '<span class="chat-caret" aria-hidden="true"></span>';
-/** Documents a search shows before "Show more". */
+/** Documents a search shows before "Show more" while the answer is still being found. */
 const FOUND_SHOWN = 3;
 function liveLabel(s) {
   if (s.k === 'search' && /^Searched /.test(s.label)) return s.label.replace(/^Searched /, 'Searching ');
@@ -523,11 +523,24 @@ function docCard(m, s, id, i) {
   const badges = ns.length ? `<span class="chat-doc__ns" aria-label="${ns.length > 1 ? 'Sources' : 'Source'} ${ns.join(', ')}">${ns.map(n => `<span class="chat-doc__n">${n}</span>`).join('')}</span>` : '';
   return `<button type="button" role="listitem" class="chat-doc${f.cls}"${f.style} data-act="doc-preview" data-id="${d.id}"${hit?.item ? ` data-cite="${esc(X.cite.data(hit))}"` : ''}>${fileIcon(d.type, 'sm')}<span class="chat-doc__head"><span class="chat-doc__title truncate" translate="no">${esc(stemName(d.name))}</span><span class="chat-doc__meta truncate">${esc(meta)}</span>${badges}</span>${hit?.quote ? `<span class="chat-doc__quote">${at ? `<b>${X.cite.whereHtml(hit)}</b> · ` : ''}<span translate="no">${esc(hit.quote)}</span></span>` : ''}</button>`;
 }
+/** While the answer is found (or when it stopped short): the search's documents, three then "Show more". Once it is
+    written: only the documents it cites; the others it found but did not use stay one quiet link away, since a near
+    match is not a source. */
 function foundHtml(m, s, si) {
   const ids = (s.docs || []).filter(id => canDoc(docById(id))); if (!ids.length) return '';
-  const key = `${m.id}:found:${si}`, all = !!cui().open[key], shown = all ? ids : ids.slice(0, FOUND_SHOWN);
-  const more = ids.length > FOUND_SHOWN ? `<div class="chat-docs__more">${linkBtn(all ? 'Show less' : 'Show more', { act: 'chat-docs-more', data: { k: key, msg: m.id } })}</div>` : '';
-  return `<div class="chat-docs" role="list" aria-label="Found documents">${shown.map((id, i) => docCard(m, s, id, i)).join('')}</div>${more}`;
+  const key = `${m.id}:found:${si}`, all = !!cui().open[key];
+  const list = shown => shown.length ? `<div class="chat-docs" role="list" aria-label="Found documents">${shown.map((id, i) => docCard(m, s, id, i)).join('')}</div>` : '';
+  const toggle = label => `<div class="chat-docs__more">${linkBtn(label, { act: 'chat-docs-more', data: { k: key, msg: m.id } })}</div>`;
+  if ((m.state || 'done') !== 'done') {
+    return list(all ? ids : ids.slice(0, FOUND_SHOWN)) + (ids.length > FOUND_SHOWN ? toggle(all ? 'Show less' : 'Show more') : '');
+  }
+  const citedIds = new Set(visCites(m).map(c => c.item));
+  const used = ids.filter(id => citedIds.has(id)), unused = ids.filter(id => !citedIds.has(id));
+  if (!unused.length) return list(used);
+  const label = used.length
+    ? (all ? 'Hide the other documents found' : 'Show the other documents found')
+    : (all ? 'Hide the documents found' : 'Show the documents found');
+  return list(all ? [...used, ...unused] : used) + toggle(label);
 }
 /** One action of the flow: icon, what it did, and what it found or ran. */
 function actionRow(m, s, si) {
@@ -560,8 +573,9 @@ function stepsList(m, live = null) {
  * How the answer is found, as one flow above it: the assistant says what it will do (a note), does it (a search shows
  * the documents it found as cards, a read names the document), says what it found and what comes next, and then
  * answers. The live row last names the action that runs right now or says "Thinking" (never a search that isn't
- * happening); a note being written needs none. Answers written in this session keep the flow open; it folds into
- * one summary line. With "Show how answers were found" off, only the live line shows.
+ * happening); a note being written needs none. The flow folds into one summary line as the answer starts to appear,
+ * so the answer takes its place before anyone reads it (no jump when it finishes); opened again, a search shows only
+ * the documents the answer cites. With "Show how answers were found" off, only the live line shows.
  */
 function stepsHtml(m) {
   const work = m.work || [], streaming = m.state === 'streaming';
@@ -572,7 +586,7 @@ function stepsHtml(m) {
   const liveLine = live ? `<span class="chat-steps__live" role="status" aria-live="polite">${THINK}<span class="chat-steps__label truncate">${esc(live.label)}</span></span>` : '';
   const shown = work.some(s => !s.live || s.k === 'note');
   if (!prefShowSteps() || (streaming && !shown)) return liveLine ? `<div class="chat-steps">${liveLine}</div>` : '';
-  if (streaming) return `<div class="chat-steps">${stepsList(m, live)}</div>`;
+  if (streaming && !(m.phase === 'write' && m.text)) return `<div class="chat-steps">${stepsList(m, live)}</div>`;
   if (!work.length) return '';
   const open = !!cui().open[m.id];
   return `<div class="chat-steps"><button type="button" class="chat-steps__toggle" data-act="chat-steps" data-msg="${m.id}" aria-expanded="${open}">${ic(open ? 'chevron-down' : 'chevron-right', 'i-sm')}<span class="truncate">${esc(stepsSummary(m) || 'How this answer was found')}</span></button>${open ? stepsList(m) : ''}</div>`;
@@ -780,8 +794,8 @@ async function stream(conv, am, fail) {
   const refreshed = am.refreshing || null; delete am.refreshing;
   delete am.activity; delete am.artifact;
   Object.assign(am, { text: '', citations: [], work: [], artifacts: [], noResults: null, partial: false, next: null, lowConf: false, feedback: null, reason: null, state: 'streaming', phase: 'work', refreshed });
-  // Written in front of the reader: its timeline stays open afterwards (no fold, no jump when it finishes).
-  if (prefShowSteps()) cui().open[am.id] = true;
+  // The flow shows open while the answer is found and folds as it starts to appear (an earlier opening is forgotten).
+  delete cui().open[am.id];
   refresh();
   const alive = () => D.convs.includes(conv) && !r.stop;
   // The model reads the question before it says anything.
@@ -831,7 +845,12 @@ async function stream(conv, am, fail) {
   if (am.variants) am.variants[am.vi] = snap(am);
   X.chatFiles?.afterStream?.(am, plan);
 }
-function end(r, am, st) { am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null; refresh(); }
+function end(r, am, st) {
+  am.state = st; am.phase = null; (am.work || []).forEach(s => (s.live = false)); if (run === r) run = null;
+  // An answer that stopped short leaves its flow open: what was found is all there is to go on.
+  if (st !== 'done' && prefShowSteps()) cui().open[am.id] = true;
+  refresh();
+}
 /** Add a user turn to a conversation and stream the answer. edit: the id of an open file the question asks to change. */
 function ask(conv, q, files = [], { edit = null } = {}) {
   stampAnswers(conv);
@@ -1138,7 +1157,7 @@ const TOUR = [
   { id: 'ask', sel: '#home-ask', title: 'Ask anything', body: () => `Answers come only from documents you can read in ${curWs().name}, with their sources. Attach files or choose what to search; the suggestions are questions people in your role ask.` },
   { id: 'start', sel: '.home-start:not(.home-start--done)', title: 'What to do first', body: () => 'Three first steps, each with its button. They tick themselves off as you do them.' },
   { id: 'picks', sel: '.home-picks', title: 'Picked for you', body: () => 'Chosen from your role’s questions, your spaces and what you read. The label on each card says why.' },
-  { id: 'domains', sel: '.home-domains', title: 'Everything, by domain', body: () => 'A domain opens Knowledge filtered to it; a topic goes straight to its documents.' },
+  { id: 'domains', sel: '.home-domains', title: 'Everything, by domain', body: () => 'A domain opens Knowledge filtered to it; a concept goes straight to its documents.' },
   { id: 'chat', sel: '#nav-chat', title: 'New chat', body: () => 'Start a conversation here, with files and a chosen scope. Your conversations are listed under Recent, lower in the sidebar.' },
   { id: 'search', sel: '#side-search, #topbar-search', title: 'Find anything', body: () => touch() ? 'Search conversations, documents and pages.' : 'Search conversations, documents and pages, or press ⌘K.' },
 ];

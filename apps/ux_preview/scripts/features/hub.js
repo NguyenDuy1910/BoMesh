@@ -1,29 +1,33 @@
 /* Knowledge: Browse (/knowledge) — the organization's knowledge, content first.
-   One search field, topic shortcuts (the only topic control) and a grid of
-   documents you can recognise and judge
-   without opening them. Filters sit right above the results as inline buttons
-   (Type · Updated · Trust · Owner, the rest under More filters), each opening a
-   light popover of checkboxes with counts; results update as you tick, and the
-   choices show as removable chips next to the result count. On phones one
-   Filters button opens them all as a bottom sheet. Saved views live in the
-   Views dropdown next to the filters (open, save, delete); on a saved view the
-   results heading is its name, click-to-edit to rename it. A document
-   opens in the shared document preview overlay (preview.js), then the Reader.
-   The URL holds the result set (q, filters, sort, view), so every set is
-   linkable and can be saved as a view. A collection is a filter here (kb=);
-   a locked one offers Request access. Personal files, saved and recent reads
-   live in My library. Model: core/catalog.js. Pieces: X.res (resources.js).
+   One search field, the first classification scheme's concepts as pills (firstScheme(): Lĩnh vực on campus, Subject
+   in enterprise) and a grid of documents you can recognise and judge without opening them. Filters sit right above
+   the results as inline buttons (the other classification schemes — Nghiệp vụ, Loại tài liệu, Đối tượng on campus —
+   then Format · Updated · Trust · Owner, the rest under More filters), each opening a light popover of checkboxes with
+   counts; results update as you tick, and the choices show as removable chips next to the result count. On phones one
+   Filters button opens them all as a bottom sheet. A search is also read for the concepts it names (interpretQuery,
+   conversation_loop.md "Knowledge retrieval"): what it understood shows as removable chips above the results, and documents filed
+   under it rank first — a boost, never a filter. A term with several meanings offers one chip per meaning and splits
+   the results into one group per meaning until one is picked. Saved views live in the Views dropdown next to the
+   filters (open, save, delete); on a saved view the results heading is its name, click-to-edit to rename it. A
+   document opens in the shared document preview overlay (preview.js), then the Reader.
+   The URL holds the result set (q, filters, sort, view; ignore = concept ids the reader set aside, pick = the meanings
+   chosen or `all`), so every set is linkable and can be saved as a view. A collection is a filter here (kb=); a locked
+   one offers Request access. Personal files, saved and recent reads live in My library. Model: core/catalog.js.
+   Pieces: X.res (resources.js). Exports X.cat (the query reading, for /search).
    Actions: cat-*. Popovers: cat-f (data-f = facet id | more | all).
-   Menus: cat-sort, cat-topics, cat-views. */
+   Menus: cat-sort, cat-pills, cat-views. */
 (() => {
   'use strict';
 
-  const PER = 24, FACET_TOP = 6, TOPIC_PILLS = 6;
-  /** Filters shown as their own buttons (the ones people narrow by most); the others sit under More filters. Topic is the pills above. */
+  const PER = 24, FACET_TOP = 6, PILLS = 6, GROUP_TOP = 6;
+  /** Filters shown as their own buttons after the other classification schemes (the ones people narrow by most); the rest sit
+      under More filters. The first scheme is the pills above. */
   const INLINE = ['type', 'upd', 'trust', 'owner'];
+  /** A concept the query names lifts every document filed under it above those that only match the words. */
+  const BOOST = 1000;
   const LAYOUTS = [['grid', 'Grid', 'grid'], ['list', 'List', 'list']];
-  /** Browse searches the organization's knowledge only (My files are in My library). */
-  const search = p => catalogSearch(p, sharedPool());
+  /** Browse searches the organization's knowledge only (My files are in My library), read the way the address says. */
+  const search = p => run(p, understand(p, S.cur.query));
 
   /** Empty Browse (nothing readable yet, or the forced Empty state). */
   function emptyKnowledge() {
@@ -43,24 +47,31 @@
   const parseQs = s => parseCatalogQuery(Object.fromEntries(new URLSearchParams(s || '')));
   /** Identity of a result set, ignoring the layout. */
   const setKey = p => qsOf({ ...p, view: 'grid' });
-  const apply = p => { cui().page = 1; setQuery(catalogQueryOf(p)); };
+  const apply = p => { cui().page = 1; setQuery({ ...catalogQueryOf(p), ...(p.q !== cur().q ? { ignore: '', pick: '' } : {}) }); };
   const facetById = id => facetsOn().find(f => f.id === id);
   const filterLabels = p => facetsOn().flatMap(f => (p.filters[f.id] || []).map(v => f.name(v)));
   const domId = s => String(s).replace(/[^\w-]/g, '_');
-  /** The one topic the shortcuts represent: a single selected domain or topic. Anything else is shown as chips. */
-  const pillTopic = p => ((p.filters.topic || []).length === 1 ? p.filters.topic[0] : '');
+  /** The one concept the pills represent: a single selected concept of the first scheme. Anything else is shown as chips. */
+  const pillConcept = p => { const on = p.filters[firstScheme()?.id] || []; return on.length === 1 ? on[0] : ''; };
   const isLanding = p => !p.q && !activeFilterCount(p);
-  /** Filter facets (everything but topic, which the pills own): the inline ones, then the rest. */
-  const filterFacets = () => facetsOn().filter(f => f.id !== 'topic');
-  const inlineFacets = () => INLINE.map(facetById).filter(Boolean);
+  /** Filter facets: everything but the first scheme, which the pills own. */
+  const filterFacets = () => facetsOn().filter(f => f.id !== firstScheme()?.id);
+  /** Inline buttons: the other classification schemes, then the INLINE ones. */
+  const inlineFacets = () => [...filterFacets().filter(f => f.scheme), ...INLINE.map(facetById).filter(Boolean)];
   /** More filters: the remaining facets that can still narrow the set (two or more values) or hold a selection. */
-  const moreFacets = (p, r) => filterFacets().filter(f => !INLINE.includes(f.id) && ((r.facets[f.id] || []).length > 1 || (p.filters[f.id] || []).length));
+  const moreFacets = (p, r) => filterFacets().filter(f => !f.scheme && !INLINE.includes(f.id) && ((r.facets[f.id] || []).length > 1 || (p.filters[f.id] || []).length));
   const nOn = (p, list) => list.reduce((a, f) => a + (p.filters[f.id] || []).length, 0);
   const savedView = p => myViews().find(v => setKey(parseQs(v.query)) === setKey(p));
 
   /* ═══════════════ Filters: inline buttons → popovers (bottom sheet on phones) ═══════════════ */
-  const optLabel = o => `<span class="cat-opt__label">${esc(o.label)}</span><span class="cat-opt__n">${fmtNum(o.count)}</span>`;
-  const optBox = (f, o) => `<div class="${cx('cat-opt', !o.count && 'is-zero')}">${checkbox({ id: `cf-${f.id}-${domId(o.value)}`, checked: o.on, act: 'cat-facet', data: { f: f.id, v: o.value }, label: optLabel(o) })}</div>`;
+  /** An option's name and count. A concept (scheme facets) is content, never translated; a narrower one carries its broader path
+      on a second, quieter line, and its full path as the tooltip. */
+  function optLabel(f, o) {
+    const up = f.scheme && conceptById(o.value)?.broader?.[0];
+    const attrs = f.scheme ? ` translate="no" title="${esc(conceptPathText(o.value))}"` : '';
+    return `<span class="cat-opt__label"${attrs}>${esc(o.label)}${up ? `<span class="cat-opt__in">${esc(conceptPathText(up))}</span>` : ''}</span><span class="cat-opt__n">${fmtNum(o.count)}</span>`;
+  }
+  const optBox = (f, o) => `<div class="${cx('cat-opt', !o.count && 'is-zero')}">${checkbox({ id: `cf-${f.id}-${domId(o.value)}`, checked: o.on, act: 'cat-facet', data: { f: f.id, v: o.value }, label: optLabel(f, o) })}</div>`;
   function checkOpts(f, opts) {
     const more = cui().more[f.id];
     const shown = more ? opts : opts.filter((o, i) => i < FACET_TOP || o.on);
@@ -115,50 +126,126 @@
     return `<div class="cat-bar" role="group" aria-label="Search, filter and sort">${searchBar(p)}<div class="cat-bar__filters">${inline}</div>${all}<div class="cat-bar__end">${views}${sort}${layout}</div></div>`;
   }
 
-  /* ═══════════════ Search and topic shortcuts ═══════════════ */
+  /* ═══════════════ Search and the first scheme's pills ═══════════════ */
   /** One compact field at the start of the filter bar — search is one more way to narrow the same results. Typing searches documents
       (live); Ask AI sits in the results header. The count lives there too. */
   function searchBar(p) {
-    return `<div class="cat-search">${searchField({ act: 'cat-q', value: p.q, id: 'cat-q', placeholder: 'Search documents' })}</div>`;
+    return `<div class="cat-search">${searchField({ act: 'cat-q', value: p.q, id: 'cat-q', placeholder: 'Search titles, concepts and content' })}</div>`;
   }
-  /** One topic shortcut. With `topic` it leads with the topic's icon in its color and, when chosen, takes a soft wash of that color
-      (topicLook, core/catalog.js); All stays neutral. */
-  const pill = (label, { on, value = '', count, act = 'cat-topic', topic = '' } = {}) => {
-    const l = topic ? topicLook(topic) : null;
-    return `<button type="button" class="${cx('cat-pill', l && 'cat-pill--topic', on && 'is-on')}"${l?.style || ''} data-act="${act}" data-v="${esc(value)}" aria-pressed="${!!on}">${l ? `<span class="cat-pill__ic">${ic(l.icon)}</span>` : ''}${esc(label)}${count != null ? `<span class="cat-pill__n">${fmtNum(count)}</span>` : ''}</button>`;
+  /** One pill. With `concept` it leads with the concept's icon in its family's color and, when chosen, takes a soft wash of that
+      color (conceptLook, core/catalog.js); All stays neutral. Concept names are content: never translated. */
+  const pill = (label, { on, value = '', count, concept = '' } = {}) => {
+    const l = concept ? conceptLook(concept) : null, name = concept ? `<span translate="no">${esc(label)}</span>` : esc(label);
+    return `<button type="button" class="${cx('cat-pill', l && 'cat-pill--concept', on && 'is-on')}"${l?.style || ''} data-act="cat-pill" data-v="${esc(value)}" aria-pressed="${!!on}">${l ? `<span class="cat-pill__ic">${ic(l.icon)}</span>` : ''}${name}${count != null ? `<span class="cat-pill__n">${fmtNum(count)}</span>` : ''}</button>`;
   };
-  /** Topic shortcuts: domains as one row of pills (the first few, the rest under More); a chosen domain reveals its topics. */
-  function topicBar(p, r) {
-    const counts = new Map((r.facets.topic || []).map(o => [o.value, o.count]));
-    const domains = topicTree().filter(dm => counts.get(dm.id));
-    if (!domains.length) return '';
-    const sel = pillTopic(p), selDomain = sel && (topicById(sel)?.parent || sel);
-    const shown = domains.slice(0, TOPIC_PILLS), rest = domains.slice(TOPIC_PILLS);
-    if (selDomain && rest.some(d => d.id === selDomain)) shown.push(rest.splice(rest.findIndex(d => d.id === selDomain), 1)[0]);
-    const more = rest.length ? `<button type="button" class="cat-pill cat-pill--more" data-menu="cat-topics" aria-haspopup="menu">More${ic('chevron-down', 'i-xs')}</button>` : '';
-    const top = `<div class="cat-pills" role="group" aria-label="Topics">${pill('All', { on: !sel })}${shown.map(dm => pill(dm.name, { on: dm.id === selDomain, value: dm.id, topic: dm.id })).join('')}${more}</div>`;
-    const dm = selDomain && domains.find(d => d.id === selDomain);
-    const kids = dm ? dm.children.filter(t => counts.get(t.id)) : [];
-    const sub = kids.length > 1 ? `<div class="cat-pills cat-pills--sub" role="group" aria-label="Topics in ${esc(dm.name)}">${pill(`All ${dm.name}`, { on: sel === dm.id, value: dm.id })}${kids.map(t => pill(t.name, { on: sel === t.id, value: t.id, count: counts.get(t.id), topic: t.id })).join('')}</div>` : '';
+  const facetCounts = (r, id) => new Map((r.facets[id] || []).map(o => [o.value, o.count]));
+  /** The first scheme's top concepts that hold results, in the scheme's order — and the chosen one's, even when it holds none now. */
+  function pillTops(p, counts) {
+    const s = firstScheme(), sel = pillConcept(p), selTop = sel && conceptTop(sel);
+    return s ? topConcepts(s.id).filter(c => counts.get(c.id) || c.id === selTop) : [];
+  }
+  /** The pills: the first scheme's top concepts with their counts in one row (the first few, the rest under More); a chosen one
+      reveals its narrower concepts. Counts roll up: a document filed under a narrower concept counts under its top once. */
+  function conceptBar(p, r) {
+    const s = firstScheme(); if (!s) return '';
+    const counts = facetCounts(r, s.id), tops = pillTops(p, counts);
+    if (!tops.length) return '';
+    const sel = pillConcept(p), selTop = sel && conceptTop(sel);
+    const shown = tops.slice(0, PILLS), rest = tops.slice(PILLS);
+    if (selTop && rest.some(c => c.id === selTop)) shown.push(rest.splice(rest.findIndex(c => c.id === selTop), 1)[0]);
+    const more = rest.length ? `<button type="button" class="cat-pill cat-pill--more" data-menu="cat-pills" aria-haspopup="menu">More${ic('chevron-down', 'i-xs')}</button>` : '';
+    const top = `<div class="cat-pills" role="group" aria-label="${esc(s.name)}">${pill('All', { on: !sel })}${shown.map(c => pill(conceptName(c.id), { on: c.id === selTop, value: c.id, count: counts.get(c.id) || 0, concept: c.id })).join('')}${more}</div>`;
+    const kids = selTop ? narrowerOf(selTop).filter(c => counts.get(c.id)) : [], lineage = sel ? conceptLineage(sel) : [];
+    const sub = kids.length > 1 ? `<div class="cat-pills cat-pills--sub" role="group" aria-label="${esc(`In ${conceptName(selTop)}`)}">${pill(`All ${conceptName(selTop)}`, { on: sel === selTop, value: selTop })}${kids.map(c => pill(conceptName(c.id), { on: lineage.includes(c.id), value: c.id, count: counts.get(c.id), concept: c.id })).join('')}</div>` : '';
     return top + sub;
   }
-  MENUS['cat-topics'] = () => {
-    const p = cur(), r = search(p), counts = new Map((r.facets.topic || []).map(o => [o.value, o.count]));
-    return [{ section: 'More topics' }, ...topicTree().filter(dm => counts.get(dm.id)).slice(TOPIC_PILLS).map(dm => ({ label: dm.name, meta: fmtNum(counts.get(dm.id)), run: () => A['cat-topic']({ dataset: { v: dm.id } }) }))];
+  MENUS['cat-pills'] = () => {
+    const p = cur(), s = firstScheme(), counts = facetCounts(search(p), s?.id), rest = pillTops(p, counts).slice(PILLS);
+    return [{ section: s?.name || '' }, ...rest.map(c => ({ label: conceptName(c.id), meta: fmtNum(counts.get(c.id) || 0), run: () => A['cat-pill']({ dataset: { v: c.id } }) }))];
   };
 
+  /* ═══════════════ Reading the query: the concepts it names (conversation_loop.md "Knowledge retrieval") ═══════════════ */
+  const listParam = v => String(v || '').split(',').filter(Boolean);
+  /** What the query names, with the reader's choices (query.ignore: concept ids set aside; query.pick: the meanings chosen — their
+      schemes — or `all`, every result in one list without choosing): { chips: [{ key, scheme, ids, picked }] (one per term and
+      scheme: an expansion group is one chip), ids (every concept that boosts), amb (the first term still open, with its options),
+      grouped (results split by its options) }. */
+  function understand(p, query = {}) {
+    const out = { chips: [], ids: [], amb: null, grouped: false };
+    if (!p.q) return out;
+    const qi = interpretQuery(p.q), ignore = listParam(query.ignore), pick = listParam(query.pick);
+    qi.concepts.filter(c => !ignore.includes(c.id)).forEach(c => {
+      const scheme = conceptById(c.id)?.scheme, key = `${c.text}|${scheme}`;
+      let chip = out.chips.find(x => x.key === key);
+      if (!chip) out.chips.push(chip = { key, scheme, ids: [], picked: false });
+      chip.ids.push(c.id);
+    });
+    qi.ambiguities.forEach(a => {
+      const o = a.options.find(x => pick.includes(x.scheme));
+      if (o) out.chips.push({ key: `${a.text}|${o.scheme}`, scheme: o.scheme, ids: o.concepts, picked: true });
+      else out.amb ??= a;
+    });
+    out.ids = [...new Set(out.chips.flatMap(c => c.ids))];
+    out.grouped = !!out.amb && !pick.includes('all');
+    return out;
+  }
+  /** Run a query: the words, plus — when it names concepts — every document filed under them, those first under Best match whether
+      or not the words match (a boost, not a filter). Filters, facet counts and the other sorts work as in catalogSearch. An open
+      ambiguity boosts every meaning and, while grouped, adds `groups` (groupsOf). */
+  function run(p, qi, pool = sharedPool()) {
+    const sets = qi.amb ? qi.amb.options.map(o => [...qi.ids, ...o.concepts]) : qi.ids.length ? [qi.ids] : [];
+    if (!sets.length) return catalogSearch(p, pool);
+    const toks = tokens(p.q), text = new Map();
+    pool.forEach(d => { const s = scoreRes(d, toks); if (s > 0) text.set(d.id, s); });
+    const hit = new Set(pool.filter(d => sets.some(ids => matchesConcepts(d, ids))).map(d => d.id));
+    const r = catalogSearch({ ...p, q: '' }, pool.filter(d => text.has(d.id) || hit.has(d.id)));
+    r.rows.forEach(x => { x.score = (hit.has(x.doc.id) ? BOOST : 0) + (text.get(x.doc.id) || 0); });
+    r.sort = p.sort || 'relevance';
+    if (r.sort === 'relevance') r.rows.sort((a, b) => b.score - a.score || b.doc.updated - a.doc.updated);
+    if (qi.grouped) r.groups = groupsOf(r.rows.map(x => x.doc), qi);
+    return r;
+  }
+  /** One group per meaning, in the options' order, each leaving out what an earlier meaning already holds (the second “khóa luận”
+      group: thesis work that isn't itself a thesis); then what only matches the words (option null). Empty groups are left out. */
+  function groupsOf(docs, qi) {
+    const opts = qi.amb.options, taken = new Set();
+    const groups = opts.map((o, i) => {
+      const own = docs.filter(d => matchesConcepts(d, [...qi.ids, ...o.concepts]) && !opts.slice(0, i).some(e => matchesConcepts(d, e.concepts)));
+      own.forEach(d => taken.add(d.id));
+      return { option: o, docs: own };
+    }).filter(g => g.docs.length);
+    const rest = docs.filter(d => !taken.has(d.id));
+    return rest.length ? [...groups, { option: null, docs: rest }] : groups;
+  }
+  /** What the search understood, right above the results: each concept a removable chip (× searches without it); a term with
+      several meanings offers one chip per meaning — picking one turns it into a chip. */
+  function interpLine(qi) {
+    const chips = qi.chips.map(c => {
+      const s = schemeName(c.scheme), names = c.ids.map(conceptName).join(', ');
+      return `<button type="button" class="cat-chip cat-chip--concept"${conceptLook(c.ids[0]).style} data-act="cat-qx" ${dataAttrs(c.picked ? { pick: c.scheme } : { ids: c.ids.join(',') })} aria-label="${esc(`Search without ${s}: ${names}`)}"><span class="cat-chip__k" translate="no">${esc(s)}:</span><span class="truncate" translate="no">${esc(names)}</span>${ic('x', 'i-xs')}</button>`;
+    });
+    const opts = qi.amb ? qi.amb.options.map(o => { const l = conceptLook(o.concepts[0]); return `<button type="button" class="cat-qopt"${l.style} data-act="cat-pick" data-v="${esc(o.scheme)}">${ic(l.icon, 'i-xs')}<span class="truncate" translate="no">${esc(o.label)}</span></button>`; }).join('') : '';
+    if (!chips.length && !opts) return '';
+    return `<div class="cat-interp" role="group" aria-label="How your search was understood">${chips.length ? `<div class="cat-interp__row"><span class="cat-interp__k">Understood as</span>${chips.join('')}</div>` : ''}${opts ? `<div class="cat-interp__row"><span class="cat-interp__k">${esc(`“${qi.amb.text}” can mean:`)}</span>${opts}</div>` : ''}</div>`;
+  }
+  /** The same reading, compact and read-only (/search's Documents group): the concepts as tags. */
+  const understood = qi => (qi.ids.length ? `<p class="cat-interp cat-interp--compact"><span class="cat-interp__k">Understood as</span>${qi.ids.map(id => conceptTag(id)).join('')}</p>` : '');
+  X.cat = { understand, run, understood };
+
   /* ═══════════════ Results ═══════════════ */
-  /** Context every result on the page shares (one base, one topic) — said once by the filters, not on every card. */
+  /** The first-scheme concept a document's card would show first. */
+  const firstConcept = d => { const s = firstScheme()?.id; return res(d).concepts.find(id => conceptById(id)?.scheme === s) || ''; };
+  /** Context every result on the page shares (one base, one concept of the first scheme) — said once by the filters, not on every card. */
   function sharedContext(page) {
     const one = f => page.length > 1 && new Set(page.map(f)).size === 1;
-    return [one(d => d.kb) && 'kb', one(d => res(d).topics[0] || '') && 'topic'].filter(Boolean);
+    return [one(d => d.kb) && 'kb', one(firstConcept) && 'concept'].filter(Boolean);
   }
-  /** The result count with the choices that produced it: each filter a removable chip (the topic pill excepted — it shows itself),
-      Clear all (which clears the topic too), and Ask AI about the set — the query's words, or the filtered documents. On a saved view
+  /** The result count with the choices that produced it: each filter a removable chip (the pill's concept excepted — it shows itself),
+      Clear all (which clears the pill too), and Ask AI about the set — the query's words, or the filtered documents. On a saved view
       the heading is the view's name, click-to-edit (Enter or leaving the field renames it, Escape cancels). */
   function resultsHead(p, r) {
-    const pt = pillTopic(p), v = savedView(p), u = cui();
-    const chips = facetsOn().flatMap(f => (p.filters[f.id] || []).filter(v => !(f.id === 'topic' && v === pt)).map(v => `<button type="button" class="cat-chip" data-act="cat-unfilter" data-f="${f.id}" data-v="${esc(v)}" aria-label="Remove filter ${esc(f.label)}: ${esc(f.name(v))}"><span class="cat-chip__k">${esc(f.label)}</span><span class="truncate">${esc(f.name(v))}</span>${ic('x', 'i-xs')}</button>`));
+    const pc = pillConcept(p), first = firstScheme()?.id, v = savedView(p), u = cui();
+    const chips = facetsOn().flatMap(f => (p.filters[f.id] || []).filter(v => !(f.id === first && v === pc)).map(v => `<button type="button" class="cat-chip" data-act="cat-unfilter" data-f="${f.id}" data-v="${esc(v)}" aria-label="Remove filter ${esc(f.label)}: ${esc(f.name(v))}"><span class="cat-chip__k">${esc(f.label)}</span><span class="truncate"${f.scheme ? ' translate="no"' : ''}>${esc(f.name(v))}</span>${ic('x', 'i-xs')}</button>`));
     const clear = chips.length ? linkBtn('Clear all', { act: 'cat-clear' }) : '';
     // Search narrows the set; Ask AI turns it into a cited answer — two clearly named actions, never mixed in one control.
     const ask = (p.q || activeFilterCount(p)) && r.total ? btn(p.q ? 'Ask AI' : 'Ask about these', { v: 'ghost', size: 'sm', icon: 'sparkles', act: 'cat-ask', tip: p.q ? 'Get an answer with sources from these documents' : 'Get an overview with sources from these documents' }) : '';
@@ -169,12 +256,23 @@
     return `<div class="cat-head">${title}<span class="cat-count" role="status"><span aria-hidden="true">${fmtNum(r.total)}</span><span class="sr-only">${plural(r.total, 'document')}</span></span>${chips.length ? `<div class="cat-chips">${chips.join('')}${clear}</div>` : ''}<span class="grow"></span>${ask}</div>`;
   }
   function results(p, r) {
+    if (r.groups?.some(g => g.option)) return `<div class="cat-results cat-qgroups">${groupedResults(p, r.groups)}</div>`;
     const page = paginate(r.rows, 'cat', PER).map(x => x.doc), data = p.q ? { q: p.q } : undefined;
     if (p.view === 'list') return `<div class="cat-results">${X.res.rows(page, () => ({ q: p.q, act: 'cat-select', data }))}</div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
-    // Cards draw from the list's own data (each document's cover): no content read per card.
-    const hide = sharedContext(page);
-    const cards = page.map(d => X.res.card(d, { act: 'cat-select', data, q: p.q, hide })).join('');
-    return `<div class="cat-results"><div class="cat-cards">${cards}</div></div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
+    return `<div class="cat-results">${cardGrid(page, p, data)}</div>${r.total > PER ? pager(r.total, 'cat', PER) : ''}`;
+  }
+  /** Cards draw from the list's own data (each document's cover): no content read per card. */
+  const cardGrid = (docs, p, data) => { const hide = sharedContext(docs); return `<div class="cat-cards">${docs.map(d => X.res.card(d, { act: 'cat-select', data, q: p.q, hide })).join('')}</div>`; };
+  /** A term with several meanings, none picked: one section per meaning (its label, its count, its first documents; See all picks
+      it), then Other matches (See all lists every result without choosing). Replaces the paged grid only while grouped. */
+  function groupedResults(p, groups) {
+    const data = { q: p.q };
+    return groups.map(g => {
+      const label = g.option ? g.option.label : 'Other matches', top = g.docs.slice(0, GROUP_TOP);
+      const all = g.docs.length > GROUP_TOP ? linkBtn(`See all ${fmtNum(g.docs.length)}`, { act: 'cat-pick', data: { v: g.option?.scheme || 'all' }, icon: 'arrow-right' }) : '';
+      const body = p.view === 'list' ? X.res.rows(top, () => ({ q: p.q, act: 'cat-select', data })) : cardGrid(top, p, data);
+      return `<section class="cat-qgroup" aria-label="${esc(label)}"><div class="cat-qgroup__head"><h3 class="cat-qgroup__title"${g.option ? ' translate="no"' : ''}>${esc(label)}</h3><span class="cat-count">${fmtNum(g.docs.length)}</span><span class="grow"></span>${all}</div>${body}</section>`;
+    }).join('');
   }
   function noMatches(p) {
     // Filtered to a base the caller can't read: say so and offer Request access, never an empty result.
@@ -206,21 +304,30 @@
       error: () => errorState(),
       ok: () => {
         if (!sharedPool().length) return emptyKnowledge();
-        const r = search(p), key = setKey(p);
+        const qi = understand(p, query), r = run(p, qi), key = setKey(p);
         if (u.lastKey !== key) { u.page = 1; u.lastKey = key; }
-        const topics = topicBar(p, r);
-        return `${topics ? `<div class="cat-top">${topics}</div>` : ''}
-          <section class="cat-main" aria-label="Documents">${filterBar(p, r)}${resultsHead(p, r)}${r.total ? results(p, r) : noMatches(p)}</section>${lockedNote(p)}`;
+        const pills = conceptBar(p, r);
+        return `${pills ? `<div class="cat-top">${pills}</div>` : ''}
+          <section class="cat-main" aria-label="Documents">${filterBar(p, r)}${interpLine(qi)}${resultsHead(p, r)}${r.total ? results(p, r) : noMatches(p)}</section>${lockedNote(p)}`;
       },
     });
     return `<div class="page page--wide cat">${head}${body}</div>`;
   };
 
   /* ═══════════════ Actions ═══════════════ */
-  A['cat-q'] = el => { cui().page = 1; setQuery({ q: el.value }); };
-  A['cat-q-clear'] = () => { cui().page = 1; setQuery({ q: '' }); $('#cat-q')?.focus(); };
-  /** Topic shortcut: one topic at a time; All clears it. */
-  A['cat-topic'] = el => { const p = cur(), v = el.dataset.v || ''; p.filters.topic = v ? [v] : []; apply(p); };
+  /** New words, a new reading: the chips set aside and the meanings picked belong to the old query. */
+  A['cat-q'] = el => { cui().page = 1; setQuery({ q: el.value, ignore: '', pick: '' }); };
+  A['cat-q-clear'] = () => { cui().page = 1; setQuery({ q: '', ignore: '', pick: '' }); $('#cat-q')?.focus(); };
+  /** A pill: one concept of the first scheme at a time; All clears it. */
+  A['cat-pill'] = el => { const p = cur(), s = firstScheme(), v = el.dataset.v || ''; if (!s) return; p.filters[s.id] = v ? [v] : []; apply(p); };
+  /** × on an understood concept: search without it (ignore=); on a picked meaning: back to the choice (pick=). */
+  A['cat-qx'] = el => {
+    const q = S.cur.query; cui().page = 1;
+    if (el.dataset.pick) setQuery({ pick: listParam(q.pick).filter(x => x !== el.dataset.pick).join(',') });
+    else setQuery({ ignore: [...new Set([...listParam(q.ignore), ...listParam(el.dataset.ids)])].join(',') });
+  };
+  /** A meaning chip or a group's See all: that meaning becomes an understood concept; `all` lists every result without choosing. */
+  A['cat-pick'] = el => { const v = el.dataset.v || ''; if (!v) return; cui().page = 1; setQuery({ pick: [...listParam(S.cur.query.pick).filter(x => x !== 'all' && x !== v), v].join(',') }); };
   /** A tick in a filter popover: results update right away; the popover stays open (it re-renders with the new counts). */
   A['cat-facet'] = el => {
     const p = cur(), f = facetById(el.dataset.f), v = el.dataset.v || ''; if (!f) return;
@@ -230,7 +337,7 @@
   };
   A['cat-unfilter'] = el => { const p = cur(), f = el.dataset.f; p.filters[f] = (p.filters[f] || []).filter(x => x !== el.dataset.v); apply(p); };
   A['cat-clear-facets'] = el => { const p = cur(); (el.dataset.f || '').split(',').forEach(f => { p.filters[f] = []; }); apply(p); };
-  /** Clear all: every filter, the topic included — the result count goes back to everything (the search words stay; they have their own ×). */
+  /** Clear all: every filter, the pill included — the result count goes back to everything (the search words stay; they have their own ×). */
   A['cat-clear'] = () => { const p = cur(); p.filters = {}; apply(p); };
   A['cat-more'] = el => { const m = cui().more; m[el.dataset.f] = !m[el.dataset.f]; refreshLayer(); };
   A['cat-layout'] = el => setQuery({ view: el.dataset.value === 'grid' ? '' : el.dataset.value });

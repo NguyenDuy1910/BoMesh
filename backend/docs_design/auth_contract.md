@@ -145,6 +145,28 @@ GetMember on `workspaces/{workspace}/members/me` and
 TestWorkspaceIamPermissions give the caller's membership and permissions for
 navigation.
 
+## Member affiliation (personal data)
+
+`Member.affiliation {units[], programs[], cohort, source}` records which org
+units (`org-unit` concepts), study programs (`program` concepts) and entry
+year a member belongs to. It is personal data:
+
+- **Sources.** `DIRECTORY`: ImportMemberAffiliations
+  (`workspaces/{workspace}/members:importAffiliations`) loads the registrar's
+  list (email, program or unit as notation, concept name or exact mapping
+  code such as the MOET program code, cohort), atomically. `ADMIN`:
+  UpdateMember with `updateMask=affiliation`. A directory import never
+  overwrites an admin edit (the member is returned in `skippedMembers`).
+  Members never declare their own affiliation; no other method writes it.
+- **Who reads it.** The member on their own membership (`members/me` or their
+  ID) and holders of `members.update` (workspace admins). Everyone else gets
+  Members without the field, in GetMember, ListMembers and every other Member
+  response. Writing it needs `members.update`, also for one's own membership.
+- **Use.** Only search ranking and applicability exclusion
+  (`conversation_loop.md` "Knowledge retrieval"; `api_design.md` SearchItems interpretation); it is never shown to other members.
+- **Lifetime.** Ending the membership (DeleteMember, LeaveWorkspace) deletes
+  it; a re-admitted member starts without one.
+
 ## Error rules
 
 - Global OpenAPI security is bearer; CreateUser, CreateSession,
@@ -205,8 +227,8 @@ password is `19102003` (`--password` overrides). It seeds two CAMPUS workspaces:
 
 | Code | Workspace | Seeded structure |
 | --- | --- | --- |
-| `hcmute` | *Trường Đại học Công nghệ Kỹ thuật TP. Hồ Chí Minh* | shared root collection *Kho tài liệu chung* (`workspaceMembers` → `collectionViewer`, accepts contributions) with the faculty/office folders of `seed_fixtures/hcmute/collections.json`; restricted root *Kho bài giảng nội bộ* (no `workspaceMembers` grant, discoverable); space *Khoa Công nghệ Thông tin* (`khoa-cntt`); the topics of `seed_fixtures/hcmute/topics.csv` |
-| `ftu-hcmc` | *Phân hiệu Trường Đại học Ngoại thương tại TP. Hồ Chí Minh* | none: collections and topics come with its ingestion |
+| `hcmute` | *Trường Đại học Công nghệ Kỹ thuật TP. Hồ Chí Minh* | shared root collection *Kho tài liệu chung* (`workspaceMembers` → `collectionViewer`, accepts contributions) with the faculty/office folders of `seed_fixtures/hcmute/collections.json`; restricted root *Kho bài giảng nội bộ* (no `workspaceMembers` grant, discoverable); space *Khoa Công nghệ Thông tin* (`khoa-cntt`); the forked university templates plus the `domain` scheme and the `org-unit` and `program` authorities of `seed_fixtures/hcmute/` with its `rules.csv` |
+| `ftu-hcmc` | *Phân hiệu Trường Đại học Ngoại thương tại TP. Hồ Chí Minh* | the forked university templates only: collections and its own schemes come with its ingestion |
 
 A workspace's display name is the organization's official name; its code is
 the short web address. Apart from the platform owner, every seeded account is a
@@ -224,7 +246,7 @@ username or email.
 | `platform.noaccess` | Negative case | active account, no membership, no role |
 | `hcmute.admin` | HCM-UTE system administration | `workspaceAdmin` |
 | `hcmute.curator` | HCM-UTE knowledge administration; creates its seeded resources | `workspaceAdmin` |
-| `hcmute.member` | Plain member | `workspaceMember` |
+| `hcmute.member` | Plain member; a student: affiliation program Công nghệ thông tin (`p-7480201`), cohort 2022 | `workspaceMember` |
 | `hcmute.collection-owner` | Collection role | `workspaceMember` + `collectionOwner` on *Kho bài giảng nội bộ* |
 | `hcmute.collection-editor` | Collection role | `workspaceMember` + `collectionEditor` on *Kho bài giảng nội bộ* |
 | `hcmute.collection-viewer` | Collection role | `workspaceMember` + `collectionViewer` on *Kho bài giảng nội bộ* |
@@ -238,9 +260,17 @@ username or email.
 | `ftu-hcmc.suspended` | Negative case | `workspaceMember`, account `SUSPENDED` |
 
 The seed writes identities, memberships (each with its PERSONAL collection),
-the shared resources and the role bindings in one transaction, then imports
-topics and folders through the public API (ImportTopics MERGE,
-ImportCollections) as the workspace's curator. Every run restores the matrix:
+the shared resources and the role bindings in one transaction, then works
+through the public API: as the platform administrator it creates and publishes
+the platform templates of `seed_fixtures/templates/vn-university` (function,
+document-type and audience schemes with their groups, ImportConcepts MERGE);
+as each workspace's curator it forks those templates (a re-run takes the
+templates' non-conflicting changes, DiffConceptSchemeTemplate), creates the
+workspace's own schemes, publishes every scheme, turns the template's and the
+workspace's `rules.csv` files into ConceptRules, imports the seeded students'
+affiliations (ImportMemberAffiliations, `source` DIRECTORY) and the folders
+(ImportCollections). Workspaces created through the API fork nothing: their
+administrators fork the templates they want. Every run restores the matrix:
 names and passwords are reset, imports create only what is missing, and each
 account's direct bindings on the workspace, the restricted collection and the
 space become exactly the listed roles. Workspace and account IDs are

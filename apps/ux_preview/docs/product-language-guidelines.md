@@ -97,7 +97,7 @@ Columns: **Tiếng Việt** is canonical; **English** is the English UI string; 
 | Nguồn dữ liệu | Source | A connection that keeps a kho tài liệu in sync (Drive folder, Confluence space) | **Nguồn** (citations in answers); Tài khoản kết nối |
 | Tài khoản kết nối | Account (connected) | The credentials a nguồn dữ liệu uses ("Kết nối tài khoản") | Tài khoản (your sign-in) |
 | Trình kết nối | Connector | An app type BoMesh can connect to (platform console) | Nguồn dữ liệu |
-| Chủ đề / Lĩnh vực | Topic / Domain | Classification: a lĩnh vực groups chủ đề | Thẻ, danh mục, phân loại (as names) |
+| Phân loại · Trục phân loại · Khái niệm · Nhãn | Classification · Scheme · Concept · Label | Classification: each trục phân loại (e.g. Lĩnh vực / Subject) is a tree of khái niệm, each with nhãn (preferred, alternative, hidden) | Chủ đề, thẻ, danh mục (as names) |
 | Tài liệu đã gửi | Contribution | A document sent for approval (contributor's view) | — |
 | Tài liệu chờ duyệt | Submission | The same item in the approver's queue | "bài gửi" |
 | Cuộc trò chuyện | Conversation | One chat with the assistant | Luồng, phiên |
@@ -176,7 +176,7 @@ Status chips, filters and descriptions use exactly these labels, in the preview 
 | Verification | Đã xác minh · Chưa xác minh · Cần xác minh lại | Verified · Not verified · Re-verification due | **Mới**: Cần xác minh lại; Tra cứu facet **Xác minh** (EN "Verification", was "Trust") |
 | Tệp của tôi | Đã tải lên, chưa tra cứu được | Uploaded, not searchable | **Mới** (was "Đã lưu trữ…", which means Archived) |
 | Tài liệu đã gửi | Đã gửi · Đang xử lý · Chờ duyệt · Cần chỉnh sửa · Đã duyệt · Đã công bố · Đã từ chối · Đã rút lại | Submitted · Processing · In review · Changes requested · Approved · Published · Declined · Withdrawn | **Mới**: Đang xử lý (was "Đang phân tích"), Đã duyệt |
-| Topic source | Trợ lý · Gợi ý · Do người chọn | Assistant · Suggested · Set by a person | Never a confidence percentage |
+| Assignment source | Trợ lý · Gợi ý · Do người chọn | Assistant · Suggested · Set by a person | Never a confidence percentage |
 | Yêu cầu | Đang mở · Đang chờ bạn · Đã phê duyệt · Đã từ chối · Đã đóng · Đã rút lại | Open · Waiting for you · Approved · Declined · Closed · Withdrawn | "Đang mở" (state) vs "Mở" (verb) need separate keys: done by the catalog (localization §3) |
 | Câu trả lời | {tài liệu} đã thay đổi sau câu trả lời này · Đã cập nhật theo phiên bản mới nhất của {tài liệu} | {document} changed after this answer · Updated from the latest version of {document} | Living answers |
 
@@ -259,14 +259,14 @@ Feature-level names, moved here from DESIGN_SYSTEM.md (this file is now their on
 | Personal sections | Knowledge sub-rows **Saved** · **My files** (never "My library" as a place) |
 | Adding knowledge | **Contribute** (shared, goes to review) · **Upload** (My files only) · **Add documents** (a collection editor, published directly) |
 | Adding sources | **Add source** everywhere (Studio Sources, empty states "No sources yet", a collection's Sources, ⌘K, setup step **Add sources**); **Connect account** only for accounts; an account's ⋯ **Add source with this account** |
-| Review | **Approve & publish** (key A) · **Request changes** (key R) · **Decline**; state **Declined**; **Use my change to improve classification** (the teach checkbox) |
-| Curation place | **Knowledge Studio** (Manage › Knowledge Studio; the place is never called "Curation"). Sections (sidebar sub-rows), named after their resources: **Documents** (`?tab=documents`, views **All** · **Processing** · **Review**; All's **Quality** filter: **Re-verification due** · **Missing details** · **Possible duplicates**) · **Collections** · **Topics** (`?tab=topics`, views **Topics** · **Suggestions**) · **Sources** (views **Sources** · **Sync history** · **Accounts**). Overview's summary is **Knowledge health**: **Processing** · **Review** · **Topic suggestions** · **Quality** · **Verified** |
+| Review | **Approve & publish** (key A) · **Request changes** (key R) · **Decline**; state **Declined** |
+| Curation place | **Knowledge Studio** (Manage › Knowledge Studio; the place is never called "Curation"). Sections (sidebar sub-rows), named after their resources: **Documents** (`?tab=documents`, views **All** · **Processing** · **Review**; All's **Quality** filter: **Re-verification due** · **Missing details** · **Possible duplicates**) · **Collections** · **Classification** (`?tab=taxonomy`, one view per scheme · **Suggestions**) · **Sources** (views **Sources** · **Sync history** · **Accounts**). Overview's summary is **Knowledge health**: **Processing** · **Review** · **Classification suggestions** · **Quality** · **Verified** |
 | Two states | See §2.4. Verbs **Process** · **Process again** · **Process the update**; **Stop**; option **Read text in images**. Drawer steps **Received** · **Processed** · **Reviewed** · **Published** · **Searchable** |
 | Publishing policy | **Publish automatically** · **Review only what's uncertain** · **Review everything** (never "Send to review first") |
-| Scale | **First sync** (a source's initial backfill); **Held back by a sync** (a batch: files held for one reason in a first sync, decided together); **Topics to confirm** (a first sync's published files with the topics the assistant applied, or without one); **Select all matching** (a selection past the page that is a filter, so it carries no number, e.g. every Not processed document) |
-| Classification target | **Topics** = the place (Topics → All) for the workspace's **topics** (domain → topic) with **keywords**, **synonyms**, **rules**, **examples** and **guidance**, named by their **names** (topic IDs are internal: never shown, never typed, never called "code"); one concept, never a second "category" list and never "master data" or "Taxonomy" as a place. The card that shows matches is **Classification**; what the contributor checked is **Confirmed by the contributor**; a topic's source reads **Assistant** · **Suggested** · **Set by a person** (never a confidence %) |
-| Learning | **Correction** (a reviewer's topic change, recorded by the teach checkbox; summarised in Topics → Suggestions as **Keywords from reviewers' corrections**) · **Show the classification prompt**. There is no auto-tag threshold: the assistant picks topics directly |
-| Topics in and out | **Import** (Add and update · Replace, then *Check the changes*) · **Export** |
+| Scale | **First sync** (a source's initial backfill); **Held back by a sync** (a batch: files held for one reason in a first sync, decided together); **Labels awaiting review** (a first sync's published files with the concepts the assistant applied, grouped by concept, plus **Not classified**); **Select all matching** (a selection past the page that is a filter, so it carries no number, e.g. every Not processed document) |
+| Classification target | **Classification** = the place (one tab per **scheme**) for the workspace's **concepts** (broader → narrower, a concept may sit under two parents: "Also under …") with **labels**, **definition**, **scope**, **relations**, **mappings** and **recognition patterns**, named by their preferred labels (notations are shown in the detail, never typed in search); never a second "category" list and never "master data" or "Taxonomy" as a place. Document-level metadata is **Document facts** (Number, Issued, Effective, Issued by, Applies to, Supersedes). The card that shows matches is **Classification**; what the contributor checked is **Confirmed by the contributor**; an assignment's source reads **Assistant** · **Suggested** · **Set by a person** (never a confidence %) |
+| Learning | **Correction** (a reviewer's classification change, recorded whenever a person changes the assistant's concepts; summarised in Classification → Suggestions as **Learned from edits** label proposals) · **See how the assistant classifies**. Uncertain assignments are **Awaiting review** |
+| Schemes in and out | **Import CSV** (scheme, notation, broader, pref_vi, pref_en, alt, hidden, definition, scope_note) · **Export SKOS** · **Version history** · **Publish ({n} changes)** |
 | Changed at the source | **Process the update** (documents Changed at the source, in Documents → Processing) · **Replace file** (uploads only) |
 | Collection access | **All members** (every member can find it and ask about it, including anyone who joins a public workspace) · **Restricted** (only the people and groups you add, plus space members) · **Private** (only its owners) |
 | Roles | **Viewer** (search and read) · **Editor** (also add documents and edit details) · **Owner** (also review submissions, manage access and settings) |
@@ -323,7 +323,7 @@ Patterns name the shape; the [feedback design system](feedback-design-system.md)
 
 ### 4.5 Search placeholders and filters
 - Placeholder = what you can search, ending with "…": "Search documents…", "Search members…". The global ⌘K field is **"Search or ask…"** in both the sidebar and the palette (**Change**: today "Search anything…" vs "Search, ask or go to…").
-- Filter labels are nouns (Topic, Type, Owner, Source, Collection, Verification, Updated, Language). Removable chip: "Topic: Admissions"; its remove button's name is "Remove filter: Topic: Admissions".
+- Filter labels are nouns (scheme names such as Lĩnh vực / Subject, Format, Owner, Source, Collection, Verification, Updated, Language). Removable chip: "Subject: Admissions"; its remove button's name is "Remove filter: Subject: Admissions".
 - No-results: "No results for “{query}”" + one next step ("Try another word, or clear filters.").
 
 ### 4.6 Form labels, helper text and validation
@@ -416,7 +416,7 @@ Events read as **past-tense sentence, actor first**: "Lan Vo archived Policies".
 | `user:{id} is not an active workspace member.` shown in an error state | "This person isn't an active member of this workspace." | No internal IDs; mapped by reason |
 | "Google did not return a sign-in credential. Please try again." | "Google didn't confirm the sign-in. Try again, or use another account." | No jargon, no "please" |
 | "Settings saved" toast on a form with a save bar | The save bar shows "Saved" | One feedback channel per action |
-| Confidence "87%" badge on topics | "Assistant" / "Suggested" / "Set by a person" | Glossary forbids false precision |
+| Confidence "87%" badge on assignments | "Assistant" / "Suggested" / "Set by a person" | Glossary forbids false precision |
 
 ## 6. Changing the vocabulary
 

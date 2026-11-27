@@ -20,9 +20,10 @@ class KnowledgeSearch(Tool):
         retriever: KnowledgeRetriever,
         *,
         result_limit: int = 5,
+        context_chunks: int = 0,
         max_queries: int = 3,
         timeout_seconds: float = 25.0,
-        max_context_characters: int = 8_000,
+        max_context_characters: int = 16_000,
         max_evidence_characters: int = 1_600,
         context_builder: ContextBuilder | None = None,
         tracer: Tracer | None = None,
@@ -31,6 +32,7 @@ class KnowledgeSearch(Tool):
         self._search = AgentKnowledgeSearchService(
             retriever,
             result_limit=result_limit,
+            context_chunks=context_chunks,
             max_queries=max_queries,
             timeout_seconds=timeout_seconds,
             max_context_characters=max_context_characters,
@@ -55,7 +57,9 @@ class KnowledgeSearch(Tool):
                 "small talk, questions about this conversation, or tasks fully "
                 "contained in the message. Supply one to three focused, standalone "
                 "queries. It returns citable evidence with a source reference to "
-                "cite, or reports that no permitted source was found."
+                "cite, or reports that no permitted source was found. It also says "
+                "how each query was read against the workspace taxonomy; when a term "
+                "has several readings, the evidence is grouped per reading."
             ),
             input_schema={
                 "type": "object",

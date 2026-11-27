@@ -2,9 +2,10 @@
 "Classification reuse").
 
 Each answer is one immutable object,
-``workspaces/{code}/files/{content_id}/classification-v1/{key}.json``, purged
+``workspaces/{code}/files/{content_id}/classification-v2/{key}.json``, purged
 with the file. The key (made by the contextualizer) names everything an answer
-depends on: model, prompt, taxonomy, note and the document's part.
+depends on: model, the request's fingerprint (scheme versions, active rules,
+classifier), prompt (instructions, note, schemes) and the document's part.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ class _FileClassifications:
         self._content_id = content_id
 
     def object_key(self, key: str) -> str:
-        return derived_key(self._workspace, self._content_id, CLASSIFICATION, 1, part=f"{key}.json")
+        return derived_key(self._workspace, self._content_id, CLASSIFICATION, 2, part=f"{key}.json")
 
     async def get(self, key: str) -> str | None:
         try:

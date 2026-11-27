@@ -106,9 +106,6 @@ export function useNavBadges(): NavCounts {
   const accounts = useCount("connections", has("sources") && can("connections.list"), async () =>
     (await call(api.GET("/api/v1/workspaces/{workspace}/connections", { params: { path, query: { pageSize: 1, filter: FAILING } } }))).totalSize ?? 0,
   );
-  const proposed = useCount("topics", has("topics"), async () =>
-    (await call(api.GET("/api/v1/workspaces/{workspace}/topics", { params: { path, query: { pageSize: 1, filter: 'state = "PROPOSED"' } } }))).totalSize ?? 0,
-  );
   // Access requests: workspace admins decide them in People › Access requests; a collection owner in Studio › Collections.
   const access = useCount("access", hasModule("requests") && (admin || has("collections")), () =>
     countRequests(id, `kind = "COLLECTION_ACCESS" AND state = "OPEN" AND requester != "${me}"`),
@@ -135,7 +132,6 @@ export function useNavBadges(): NavCounts {
   const studio = {
     documents: count(review),
     collections: count(ownerRequests),
-    topics: count(proposed),
     sources: count(sourceProblems, "danger"),
   };
   // The Studio row carries the landing section's count: decisions in Documents, else broken sources, else access requests.

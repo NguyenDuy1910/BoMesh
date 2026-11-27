@@ -88,7 +88,7 @@
 
   /* ═══════════════ Contribute dialog ═══════════════
      Contribute to a collection: pick files → Analyzing (the assistant reads them against the workspace's taxonomy) →
-     Check the details (title, topics with their evidence, collection and who will see it, summary, flags) →
+     Check the details (title, concepts per classification scheme with their evidence, collection and who will see it, summary, flags) →
      Submit for review; what the contributor confirmed travels with the submission (submission.confirmed, read by aiOf).
      Upload to My files and Submit a new version stay one step. */
   /** A['contribute']({dataset:{kb?, folder?, versionOf?, private?}}). kb preselects a base (a personal base means My files);
@@ -247,21 +247,22 @@
   /* ── Analyzing → Check the details (Contribute to a collection) ── */
   const ANALYZE_MS = 1200;
   const andList = xs => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
-  /** What the assistant reads from one file before the contributor confirms it: title, topics matched against the workspace's
-      taxonomy (with their evidence), the best-fitting collection (unless one was chosen), a summary and flags. The type is the
-      file's own class: nobody picks it. */
-  function suggest(x, preset) {
-    const probe = { id: x.id, name: x.name, type: x.type, source: 'upload' };
+  /** What the assistant reads from one file before the contributor confirms it: title, concepts per classification scheme with
+      their evidence (classifyDoc; collection and folder rules count), the best-fitting collection (unless one was chosen), a
+      summary and flags. The type is the file's own class: nobody picks it. */
+  function suggest(x, preset, folder) {
     const title = stemOf(x.name).replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
     const hint = suggestKb(x.name);
     const kb = (preset && contributionTargets().some(k => k.id === preset) ? preset : hint?.id) || contributionTargets()[0]?.id || '';
+    const probe = { id: x.id, name: x.name, type: x.type, source: 'upload', kb, ...(folder && kb === preset ? { folder } : {}) };
     const similar = similarDocs(probe);
-    const matches = topicMatches(x.name, kbById(kb), similar, probe);
-    const topics = matches.map(m => m.id);
+    const { assignments, uncertain } = classifyDoc(probe, null, x.name);
+    const concepts = assignments.map(a => a.id), about = assignments.filter(a => a.primary).map(a => conceptName(a.id));
     const dup = similar.find(s => s.sim >= 0.55 && canSeeDoc(s.doc));
     return {
-      title, topics, why: Object.fromEntries(matches.map(m => [m.id, m.why])), kb, kbHint: preset ? '' : hint?.id || '',
-      summary: `${title}.${topics.length ? ` Covers ${andList(topics.map(topicName))}.` : ''}`,
+      title, concepts, suggested: assignments.filter(a => a.state === 'suggested').map(a => a.id), uncertain,
+      why: Object.fromEntries(assignments.map(a => [a.id, a.why])), kb, kbHint: preset ? '' : hint?.id || '',
+      summary: `${title}.${about.length ? ` Covers ${andList(about)}.` : ''}`,
       personal: PERSONAL_RE.test(x.name), dup: dup ? { id: dup.doc.id, sim: dup.sim } : null,
     };
   }
@@ -272,7 +273,7 @@
     if (S.modal?.name !== 'contribute' || ui('ctb') !== f || f.step !== 'analyzing') return;
     const keep = new Set(valid.map(x => x.id));
     Object.keys(f.meta).forEach(id => { if (!keep.has(id)) delete f.meta[id]; });
-    valid.forEach(x => { f.meta[x.id] ??= suggest(x, f.kb); });
+    valid.forEach(x => { f.meta[x.id] ??= suggest(x, f.kb, f.folder); });
     f.step = 'details'; refreshLayer();
   }
   /** One progress indicator (the status line); the files it's reading are listed plainly, and the next step waits, disabled. */
@@ -281,8 +282,8 @@
     const rows = valid.map(x => item({ lead: fileIcon(x.type), title: esc(x.name), desc: fmtSize(x.size) }));
     return {
       size: 'lg', icon: 'sparkles', title: 'Analyzing',
-      desc: 'The assistant suggests a title, topics and a collection. You check them next.',
-      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>${valid.length > 1 ? `Reading the files and matching them against ${esc(ws)}’s topics…` : `Reading the file and matching it against ${esc(ws)}’s topics…`}</span></div>${list(rows)}`,
+      desc: 'The assistant suggests a title, concepts and a collection. You check them next.',
+      body: `<div class="ctb-analyzing" role="status" aria-live="polite">${spinner()}<span>${valid.length > 1 ? `Reading the files and matching them against ${esc(ws)}’s taxonomy…` : `Reading the file and matching it against ${esc(ws)}’s taxonomy…`}</span></div>${list(rows)}`,
       foot: btn('Cancel', { v: 'ghost', act: 'close-modal' }) + btn('Check the details', { v: 'primary', iconRight: 'arrow-right', disabled: true }),
     };
   }
@@ -294,15 +295,19 @@
       m.personal && alertBox('warning', 'May contain personal data', 'Remove personal details before you submit, or say in the note why they’re needed.'),
       m.dup && docById(m.dup.id) && alertBox('default', 'Possible duplicate', `Looks like “${esc(docTitle(docById(m.dup.id)))}” (${Math.round(m.dup.sim * 100)}% similar title). If it replaces that document, submit a new version of it instead.`, btn('Preview', { act: 'doc-preview', data: { id: m.dup.id } })),
     ].filter(Boolean).join('');
-    const picker = topicPicker({ id: 'ctb-add-' + x.id, ids: m.topics, act: 'ctb-topic', data: { file: x.id }, label: 'Topics', empty: 'No clear topic. Add one if you know it.' });
-    const why = m.topics.map(id => { const ev = m.why[id] ? topicEvidence(m.why[id]).join(' · ') : 'added by you'; return ev ? `<li><span class="medium" translate="no">${esc(topicName(id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(ev)}</span></li>` : ''; }).join('');
-    const topics = `<div class="field"><span class="label">Topics</span>${picker}${why ? `<ul class="cur-why" aria-label="Why these topics">${why}</ul>` : ''}</div>`;
+    // One picker per classification scheme; what the assistant isn't sure of stays marked until the contributor keeps it.
+    const schemes = classSchemes().map(s => {
+      const ids = m.concepts.filter(id => conceptById(id)?.scheme === s.id);
+      return `<div class="ctb-scheme"><span class="ctb-scheme__label" translate="no">${esc(s.name)}</span>${conceptPicker({ id: `ctb-add-${x.id}-${s.id}`, ids, act: 'ctb-concept', data: { file: x.id, scheme: s.id }, scheme: s.id, label: s.name, suggested: m.suggested, empty: m.uncertain.includes(s.id) && !ids.length ? 'Not classified' : '' })}</div>`;
+    }).join('');
+    const why = m.concepts.map(id => { const ev = m.why[id] ? conceptEvidence(m.why[id]).join(' · ') : 'added by you'; return ev ? `<li><span class="medium" translate="no">${esc(conceptName(id))}</span><span class="muted" aria-hidden="true"> — </span><span class="muted">${esc(ev)}</span></li>` : ''; }).join('');
+    const concepts = schemes ? `<div class="field"><span class="label">Classification</span><div class="ctb-schemes">${schemes}</div>${why ? `<ul class="cur-why" aria-label="Why these concepts">${why}</ul>` : ''}</div>` : '';
     const kbDesc = who ? `<span class="row gap-4">${ic(who.icon, 'i-xs')}<span>${esc(`${who.label} will see it once published.`)}${m.kb === m.kbHint ? ' Suggested by the assistant.' : ''}</span></span>` : '';
     return `<section class="ctb-check" aria-label="${esc(`Details for ${x.name}`)}">
       ${many ? `<div class="ctb-check__file">${fileIcon(x.type, 'sm')}<span class="medium truncate">${esc(x.name)}</span><span class="t-xs muted none">${fmtSize(x.size)}</span></div>` : ''}
       ${flags ? `<div class="stack gap-8">${flags}</div>` : ''}
       ${field({ id: 'ctb-title-' + x.id, label: 'Title', required: true, error: titleErr, control: input({ id: 'ctb-title-' + x.id, bind: key + '.title', value: m.title, invalid: !!titleErr, attrs: `maxlength="120"${titleErr ? ' data-live' : ''}` }) })}
-      ${topics}
+      ${concepts}
       ${field({ id: 'ctb-kb-' + x.id, label: 'Collection', desc: kbDesc, control: select({ id: 'ctb-kb-' + x.id, bind: key + '.kb', value: m.kb, options: contributionTargets().map(k => [k.id, k.name]), change: 'ctb-meta-kb' }) })}
       ${field({ id: 'ctb-sum-' + x.id, label: 'Summary', desc: 'Shown in search results and to reviewers.', control: textarea({ id: 'ctb-sum-' + x.id, bind: key + '.summary', value: m.summary, rows: 2, attrs: 'maxlength="280"' }) })}
     </section>`;
@@ -322,15 +327,20 @@
   }
   A['ctb-back'] = () => { const f = ui('ctb'); f.step = 'pick'; f.touched = false; refreshLayer(); };
   A['ctb-meta-kb'] = () => refreshLayer();
-  A['ctb-topic-remove'] = el => {
+  const refocusPicker = el => requestAnimationFrame(() => $(`#ctb-add-${el.dataset.file}-${el.dataset.scheme}`)?.focus());
+  A['ctb-concept-remove'] = el => {
     const m = ui('ctb').meta[el.dataset.file]; if (!m) return;
-    m.topics = m.topics.filter(id => id !== el.dataset.topic); refreshLayer();
-    requestAnimationFrame(() => $('#ctb-add-' + el.dataset.file)?.focus());
+    m.concepts = m.concepts.filter(id => id !== el.dataset.concept); refreshLayer();
+    refocusPicker(el);
   };
-  A['ctb-topic-add'] = el => {
-    const m = ui('ctb').meta[el.dataset.file], id = el.value; if (!m || !id || m.topics.includes(id)) return;
-    m.topics.push(id); refreshLayer();
-    requestAnimationFrame(() => $('#ctb-add-' + el.dataset.file)?.focus());
+  /** A scheme that holds one concept (maxLabels 1) swaps it; a full one swaps its last. */
+  A['ctb-concept-add'] = el => {
+    const m = ui('ctb').meta[el.dataset.file], s = schemeById(el.dataset.scheme), id = el.value;
+    if (!m || !s || !conceptById(id) || m.concepts.includes(id)) return;
+    const mine = m.concepts.filter(c => conceptById(c)?.scheme === s.id);
+    const drop = s.maxLabels && mine.length >= s.maxLabels ? mine.slice(s.maxLabels - 1) : [];
+    m.concepts = [...m.concepts.filter(c => !drop.includes(c)), id]; m.suggested = m.suggested.filter(c => c !== id); refreshLayer();
+    refocusPicker(el);
   };
   /** Submit for review with what the contributor confirmed; the title becomes the document's name (its extension kept). */
   A['ctb-submit'] = async () => {
@@ -342,7 +352,7 @@
     if (S.modal?.name !== 'contribute' || ui('ctb') !== f) return;
     const files = valid.map(x => {
       const m = f.meta[x.id], ext = extOf(x.name);
-      return { name: m.title.trim() + (ext ? '.' + ext : ''), size: x.size, type: x.type, kb: m.kb || undefined, folder: f.folder && m.kb === f.kb ? f.folder : undefined, confirmed: { topics: [...m.topics], summary: m.summary.trim() } };
+      return { name: m.title.trim() + (ext ? '.' + ext : ''), size: x.size, type: x.type, kb: m.kb || undefined, folder: f.folder && m.kb === f.kb ? f.folder : undefined, confirmed: { kind: docType(x), concepts: [...m.concepts], summary: m.summary.trim() } };
     });
     closeModal();
     const docs = submitFiles(files, { note: f.note });
@@ -388,7 +398,7 @@
   function tail(d) {
     const l = lifecycleOf(d), kb = kbById(d.kb)?.name || 'the collection', e = lastEvent(d);
     switch (l.key) {
-      case 'analyzing': return { icon: 'sparkles', tone: 'accent', title: 'The assistant is reading it', desc: 'It suggests topics and a collection for the reviewer.', live: true };
+      case 'analyzing': return { icon: 'sparkles', tone: 'accent', title: 'The assistant is reading it', desc: 'It suggests concepts and a collection for the reviewer.', live: true };
       case 'review': return { icon: 'clock', title: 'Waiting for a reviewer', desc: `The reviewers of ${kb} check it before it’s published.`, next: true };
       case 'changes': return { icon: 'pencil', title: isMine(d) ? 'Waiting for your revision' : 'Waiting for a revision', next: true };
       case 'queued': return { icon: 'clock', title: 'Waiting to be processed', desc: 'A reviewer chooses when it’s processed. Until then search and the assistant can’t use it.', next: true };
@@ -426,8 +436,8 @@
     const open = ['analyzing', 'review', 'changes'].includes(k);
     const confirmed = !!sub.confirmed;
     const submitted = { state: 'done', at: sent?.at || sub.at, text: `${sent?.kind === 'resubmitted' ? 'Resubmitted' : 'Sent'} to ${base}` };
-    const analyzed = k === 'analyzing' ? { state: 'current', busy: true, text: 'Reading the file and matching it against the topics…' }
-      : { state: 'done', text: confirmed ? `Topics and collection confirmed by ${mine ? 'you' : contributorName(d)}` : 'Topics and collection suggested' };
+    const analyzed = k === 'analyzing' ? { state: 'current', busy: true, text: 'Reading the file and matching it against the taxonomy…' }
+      : { state: 'done', text: confirmed ? `Concepts and collection confirmed by ${mine ? 'you' : contributorName(d)}` : 'Concepts and collection suggested' };
     const review = k === 'analyzing' ? { state: 'todo', text: `The reviewers of ${base} check it` }
       : k === 'review' ? { state: 'current', text: `Waiting for a reviewer of ${base}` }
         : k === 'changes' ? { state: 'issue', text: `Changes requested${by(lastBy(d, 'changes'))}`, at: lastBy(d, 'changes')?.at }
@@ -457,14 +467,14 @@
   }
 
   /* ═══════════════ Contribution panel ═══════════════ */
-  /** Read-only and transparent: what the assistant suggested (or, once published, how it's classified). */
+  /** Read-only and transparent: what the assistant suggested (or, once published, how it's classified) — concepts by scheme. */
   function suggestion(d) {
     const st = stageOf(d), kb = kbById(d.kb);
     if (st === 'published' || st === 'versioned') {
       const x = versionTarget(d) || d, r = res(x);
       return `<section><h3 class="ctb-sec__title">How it’s classified</h3>${kv([
         ['Type', esc(typeMeta(x).label)],
-        ['Topics', r.topics.length ? `<span class="ctb-topics">${r.topics.map(id => chip(topicName(id), { size: 'sm' })).join('')}</span>` : '<span class="muted">None</span>'],
+        ...X.res.schemeRows(x, { compact: true }),
         ['Collection', esc(r.kb?.name || '—')],
       ])}</section>`;
     }
@@ -473,11 +483,10 @@
     // Confirmed before submitting: the contributor's own choices, not the assistant's guesses.
     const head = `<h3 class="ctb-sec__title">${ai.confirmed ? (isMine(d) ? 'What you confirmed' : 'Confirmed by the contributor') : 'What the assistant suggested'}</h3>`;
     if (ai.status === 'analyzing') return `<section>${head}<div class="ctb-reading">${spinner('sm')}<span>Reading the file…</span></div></section>`;
-    const topics = [...ai.topics.map(t => chip(topicName(t.id), { size: 'sm' })), ...(ai.proposed || []).map(proposalById).filter(Boolean).map(p => chip(p.name, { size: 'sm', tone: 'accent', icon: 'plus', tip: 'Proposed new topic. A workspace admin decides whether to add it.' }))];
     const kbBy = ai.kb.by === 'ai' ? 'Suggested by the assistant' : `Chosen by ${isMine(d) ? 'you' : contributorName(d)}`;
     const flags = (ai.flags || []).length ? `<ul class="ctb-flags">${ai.flags.map(f => `<li>${ic(f.type === 'personal' ? 'shield' : f.type === 'format' ? 'file' : 'git-compare', 'i-sm')}<span>${esc(f.text)}</span></li>`).join('')}</ul>` : '';
     return `<section>${head}${kv([
-      ['Topics', topics.length ? `<span class="ctb-topics">${topics.join('')}</span>` : '<span class="muted">No clear topic</span>'],
+      ...X.res.schemeRows({ concepts: ai.concepts, uncertain: ai.uncertain }, { compact: true }),
       ['Collection', `<span class="stack gap-2"><span>${esc(kb?.name || '—')}</span><span class="t-xs muted">${esc(kbBy)}</span></span>`],
     ])}${flags}<p class="t-xs muted mt-8">Reviewers can change these before publishing.</p></section>`;
   }

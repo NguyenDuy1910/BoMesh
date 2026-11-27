@@ -59,7 +59,7 @@ export const vi = {
     documents: "Tài liệu",
     collections: "Kho tài liệu",
     collection: "Kho tài liệu",
-    topics: "Chủ đề",
+    taxonomy: "Phân loại",
     sources: "Nguồn dữ liệu",
     people: "Người dùng & phân quyền",
     members: "Thành viên",
@@ -187,9 +187,8 @@ export const vi = {
       details: "Thiếu thông tin",
       duplicates: "Có thể trùng lặp",
     },
-    topicViews: {
-      label: "Chế độ xem chủ đề",
-      topics: "Chủ đề",
+    taxonomyViews: {
+      label: "Trục phân loại",
       suggestions: "Gợi ý",
     },
     sourceViews: {
@@ -204,9 +203,8 @@ export const vi = {
   knowledge: {
     browse: {
       facets: {
-        topic: "Chủ đề",
+        type: "Định dạng",
         space: "Cộng đồng",
-        type: "Loại",
         owner: "Chủ sở hữu",
         src: "Nguồn dữ liệu",
         kb: "Kho tài liệu",

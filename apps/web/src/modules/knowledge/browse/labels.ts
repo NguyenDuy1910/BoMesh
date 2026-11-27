@@ -10,7 +10,8 @@ import { useSpaces } from "@/modules/spaces/queries";
 
 import { getSource } from "../api";
 import { DOC_TYPES, docTypeOf, languageName, type TrustState, type UpdatedWindow } from "../model";
-import { knowledgeKeys, useKnowledgeBases, useTopics } from "../queries";
+import { knowledgeKeys, useKnowledgeBases, useTaxonomy } from "../queries";
+import { conceptLabel, conceptNameOf, isClassification, schemeByName } from "../taxonomy";
 import type { BrowseFacetId } from "./catalog";
 
 /** A facet value's display name; `.ui` says whether that name is UI vocabulary (translated) rather than a name people gave something. */
@@ -19,7 +20,7 @@ export type FacetLabel = ((facet: BrowseFacetId, value: string, fallback?: strin
 };
 
 /**
- * Display names for Browse facet values (bare IDs and keys as in the URL): topics, spaces, document
+ * Display names for Browse facet values (bare IDs and keys as in the URL): concepts (a scheme facet's values), spaces, document
  * types (file classes), owners, sources, collections (locked ones too, so a `kb=` link names what it filters by),
  * trust, windows, languages. Owners are named by the search itself (`ownerNames`: member
  * name → the `document.owner` facet's `displayName`), so no member is read per owner; `sources`
@@ -29,7 +30,7 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
   const { id: ws, member } = useWorkspace();
   const m = useMessages();
   const facets = m.knowledge.browse.facets;
-  const topics = useTopics();
+  const taxonomy = useTaxonomy().data;
   const bases = useKnowledgeBases({ showLocked: true });
   const spaces = useSpaces();
   const sourceResults = useQueries({
@@ -41,8 +42,6 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
     (facet: BrowseFacetId, v: string, fallback = ""): [label: string, ui: boolean] => {
       const named = (name: string | undefined, uiName: string): [string, boolean] => (name ? [name, false] : [uiName, true]);
       switch (facet) {
-        case "topic":
-          return named(topics.data?.find((t) => resourceId(t.name) === v)?.displayName || fallback, "Chủ đề chưa đặt tên");
         case "space":
           return named(spaces.data?.find((s) => resourceId(s.name) === v)?.displayName || fallback, facets.space);
         case "type":
@@ -59,10 +58,16 @@ export function useFacetLabel({ ownerNames, sources = [] }: { ownerNames?: Reado
           return [m.knowledge.browse.updated[v as UpdatedWindow] ?? v, true];
         case "lang":
           return [languageName(v), true];
+        default: {
+          // A classification scheme's facet: the concept's preferred label (content).
+          const scheme = schemeByName(taxonomy, facet);
+          const concept = scheme?.name && isClassification(scheme) ? taxonomy.byName.get(conceptNameOf(scheme.name, v)) : undefined;
+          return named(concept ? conceptLabel(taxonomy, concept.name) : fallback, "Khái niệm chưa đặt tên");
+        }
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `sourceKey` captures the resolved sources
-    [topics.data, spaces.data, ownerNames, sourceKey, bases.data, member.personalCollection, ws, m],
+    [taxonomy, spaces.data, ownerNames, sourceKey, bases.data, member.personalCollection, ws, m],
   );
   return useMemo(() => Object.assign((f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[0], { ui: (f: BrowseFacetId, v: string, fb?: string) => resolve(f, v, fb)[1] }), [resolve]);
 }

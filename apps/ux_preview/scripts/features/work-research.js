@@ -43,8 +43,8 @@
   const BANK = {
     'fx-eng-eval-kafka': {
       perf: ['180k msg/s at p99 42 ms.', 3, 'In our load test Confluent Cloud sustained 180,000 messages per second at a p99 latency of 42 ms.'],
-      eos: ['Yes — idempotent producers and transactions.', 4, 'Idempotent producers and transactions give exactly-once delivery between Kafka topics out of the box.'],
-      ops: ['Low: vendor runs brokers, upgrades and scaling.', 5, 'Brokers, upgrades and scaling are run by the vendor; our team only manages topics, ACLs and connectors.'],
+      eos: ['Yes — idempotent producers and transactions.', 4, 'Idempotent producers and transactions give exactly-once delivery between Kafka streams out of the box.'],
+      ops: ['Low: vendor runs brokers, upgrades and scaling.', 5, 'Brokers, upgrades and scaling are run by the vendor; our team only manages streams, ACLs and connectors.'],
       res: ['No — nearest region is Singapore.', 6, 'The nearest Confluent Cloud region is Singapore; no region is available in Vietnam.'],
       cost: ['≈ USD 1.26M over 3 years.', 7, 'The estimated three-year cost is USD 1.26 million, including support and private networking.'],
       method: ['Load test replaying 40 payment event types.', ...EVAL_METHOD],
@@ -72,7 +72,7 @@
       limit: ['Data would leave Vietnam (Decree 13 assessment).', 6, 'Payment events contain customer account numbers, so hosting them outside Vietnam needs a cross-border transfer assessment under Decree 13/2023.'],
     },
     'fx-eng-adr027': {
-      method: ['Ledger changes only through payment events.', 1, 'Ledger balances are updated only by consuming events from the payments topic, never by direct writes.'],
+      method: ['Ledger changes only through payment events.', 1, 'Ledger balances are updated only by consuming events from the payments event stream, never by direct writes.'],
       eos: ['Requires exactly-once or idempotent consumption.', 2, 'Ledger consumers must process each event exactly once, so the streaming platform must support exactly-once delivery or idempotent consumption.'],
     },
   };
@@ -541,7 +541,7 @@
   const signoff = tone => ({ formal: 'Yours sincerely,', neutral: 'Best regards,', friendly: 'Thanks,' })[tone] || 'Best regards,';
   /** Hand-written sentences for curated sources (Finx architecture library); other sources are summarised from the evidence bank. */
   const LIT = {
-    'fx-eng-adr027': ['ADR-027 requires that ledger balances change only by consuming events from the payments topic, never by direct writes', ['fx-eng-adr027', 1], ', so every ledger consumer must process each event exactly once', ['fx-eng-adr027', 2], '.'],
+    'fx-eng-adr027': ['ADR-027 requires that ledger balances change only by consuming events from the payments event stream, never by direct writes', ['fx-eng-adr027', 1], ', so every ledger consumer must process each event exactly once', ['fx-eng-adr027', 2], '.'],
     'fx-eng-adr031': ['ADR-031 makes every payment POST carry an Idempotency-Key header', ['fx-eng-adr031', 1], ', and the gateway replays the first response for 24 hours on any retry', ['fx-eng-adr031', 2], '.'],
     'fx-eng-eval-kafka': ['Confluent Cloud sustained 180,000 messages per second at a p99 of 42 ms', ['fx-eng-eval-kafka', 3], ' with the vendor running the brokers', ['fx-eng-eval-kafka', 5], ', but it has no region in Vietnam', ['fx-eng-eval-kafka', 6], '.'],
     'fx-eng-eval-pulsar': ['Self-hosted Pulsar keeps all data in Finx data centers', ['fx-eng-eval-pulsar', 6], ' at the lowest three-year cost', ['fx-eng-eval-pulsar', 7], ', but exactly-once processing works only for Java clients', ['fx-eng-eval-pulsar', 4], '.'],
@@ -788,8 +788,8 @@
     if (!rule) {
       const m = q.match(/^(?:please\s+)?add\s+(?:an?\s+|the\s+)?(.{3,60})$/i);
       if (!m) { u.hint = 'Try “shorter”, “more formal”, “friendlier”, “longer” or “add …” (a section such as a timeline).'; refresh(); $('#dr-ask-' + w.id)?.focus(); return; }
-      const topic = m[1].replace(/[.!]+$/, ''); note = 'Added ' + topic;
-      fn = (ww, html) => { const wr = reuse(ww); const src = (ww.sources || []).map(id => { const f = finding(id, 'Result'); return f.cite ? f : null; }).filter(Boolean)[0]; return { html: html + `<h3>${esc(topic.charAt(0).toUpperCase() + topic.slice(1))}</h3><p>${src ? wr.say([`This section addresses ${topic.toLowerCase()}. It builds on the evidence that ${lc(src.text)}`, src.cite, '.']) : `This section addresses ${esc(topic.toLowerCase())}.`}</p>`, cites: wr.cites }; };
+      const section = m[1].replace(/[.!]+$/, ''); note = 'Added ' + section;
+      fn = (ww, html) => { const wr = reuse(ww); const src = (ww.sources || []).map(id => { const f = finding(id, 'Result'); return f.cite ? f : null; }).filter(Boolean)[0]; return { html: html + `<h3>${esc(section.charAt(0).toUpperCase() + section.slice(1))}</h3><p>${src ? wr.say([`This section addresses ${section.toLowerCase()}. It builds on the evidence that ${lc(src.text)}`, src.cite, '.']) : `This section addresses ${esc(section.toLowerCase())}.`}</p>`, cites: wr.cites }; };
     }
     u.busy = true; u.hint = ''; refresh();
     await sleep(1200);

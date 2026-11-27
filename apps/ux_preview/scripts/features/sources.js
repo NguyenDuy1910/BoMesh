@@ -260,7 +260,7 @@
           // No reviewer on this path, so the assistant classifies the file against the taxonomy itself.
           const d = mkDoc(src.kb, uid('d'), docName(src.app), { source: src.id, addedBy: src.name, updated: Date.now(), status: 'pending' });
           // 'Review only what's uncertain': possible personal data or a near-copy of a published document waits for a reviewer.
-          // Classification never holds a file back (what the assistant gives no topic surfaces in Topics → Suggestions instead).
+          // Classification never holds a file back (what the assistant can't file surfaces in Classification › Suggestions instead).
           if (pol === 'uncertain' && (PERSONAL_RE.test([d.name, d.summary].filter(Boolean).join(' ')) || similarDocs(d).some(x => x.sim >= 0.55))) { toReview.push(syncSubmission(src, d.name)); continue; }
           D.docs.push(d); autoClassify(d); affected.push(d);
         }
@@ -313,7 +313,7 @@
   /* ── First sync at scale ── */
   /** Starts a first sync of a large source as a backfill: counted per pipeline stage, nothing is created file by file. */
   function startBackfill(src, est) {
-    const b = { found: est.N, filtered: est.out, filteredBy: est.why.map(([l, n]) => [l, n]), read: 0, classified: 0, published: 0, review: 0, failed: 0, rate: BF_RATE, topics: { filed: 0, confirm: 0, none: 0 }, issues: [] };
+    const b = { found: est.N, filtered: est.out, filteredBy: est.why.map(([l, n]) => [l, n]), read: 0, classified: 0, published: 0, review: 0, failed: 0, rate: BF_RATE, concepts: { filed: 0, confirm: 0, none: 0 }, issues: [] };
     const run = { id: newRunId(), source: src.id, srcName: src.name, app: src.app, kb: src.kb, trigger: 'First sync', status: 'running', started: Date.now(), counts: { total: est.K, ok: 0, failed: 0, skipped: 0 }, by: me().name, backfill: b };
     D.runs.unshift(run);
     src.status = 'syncing'; src.progress = { done: 0, total: est.K }; src.runId = run.id; src.next = null;
@@ -337,8 +337,8 @@
     toast(`${s?.name || runName(r)}: first sync finished · ${fmtNum(b.published)} published${b.review ? ` · ${fmtNum(b.review)} held for review` : ''}`, { tone: 'success', action: { label: 'View', run: () => openDrawer('src-run', { id: r.id }) } });
   }
   /* A gentle tick while someone watches (Sources tab, or the source / run drawer): about rate/20 files every 3 s are
-     read, filed under a topic and published. Review and the to-confirm groups stay as they are, so
-     review = Σ open review batches and topics.confirm = Σ class groups keep holding. */
+     read, classified and published. Review and the assignments awaiting review stay as they are, so
+     review = Σ open review batches and concepts.confirm = Σ open assignment batches keep holding. */
   const bfWatched = r => onStudioTab('sources') || (S.drawer?.name === 'src-run' && S.drawer.props?.id === r.id) || (S.drawer?.name === 'src-source' && S.drawer.props?.id === r.source);
   function bfTick() {
     if (document.hidden || S.modal || !S.signedIn || typeof D === 'undefined' || !Array.isArray(D.runs)) return;
@@ -348,7 +348,7 @@
       const b = r.backfill, s = srcById(r.source);
       if (!s) return;
       const k = Math.min(bfLeft(b), Math.max(1, Math.round(b.rate / 20)));
-      b.read += k; b.classified += k; b.published += k; b.topics.filed += k;
+      b.read += k; b.classified += k; b.published += k; b.concepts.filed += k;
       r.counts.ok = b.classified; s.progress = { done: b.classified, total: r.counts.total };
       if (!bfLeft(b)) bfFinish(r, s);
       moved = true;
@@ -397,7 +397,7 @@
   /** One section for everything that brings documents in: the sources, their sync history and the accounts they sign in
       with (an account is a source's credential, not a destination of its own). Views switch with one segmented
       control; problems are fixed on their own rows. The Studio owns the header and its Add source action. The first view
-      is "All", like Documents' and Topics', so it never repeats the page title. */
+      is "All", like Documents', so it never repeats the page title. */
   const VIEWS = [['sources', 'All'], ['history', 'Sync history'], ['accounts', 'Accounts']];
   function sourcesTabBody({ query }) {
     boot();
@@ -752,7 +752,7 @@
   function stepsHtml(r) {
     return `<ol class="src-timeline">${runSteps(r).map(st => `<li class="src-timeline__step src-timeline__step--${st.st}"><span class="src-timeline__icon">${st.st === 'active' ? spinner('sm') : ic(STEP_ICON[st.st][0], 'i-sm')}</span><div class="grow"><div class="medium">${esc(st.label)}</div><div class="description">${esc(st.note)}</div></div>${st.dur >= 1000 ? `<span class="t-xs muted num">${fmtDuration(st.dur)}</span>` : ''}</li>`).join('')}</ol>`;
   }
-  /* ── First sync at scale: the pipeline, then what needs a person (issues, topics to confirm, held for review) ── */
+  /* ── First sync at scale: the pipeline, then what needs a person (issues, concepts to confirm, held for review) ── */
   const RB_REASON = { duplicate: 'Possible duplicates', personal: 'Personal data', version: 'New versions' };
   /** The sync's run, counted per step: it reads, classifies and decides (by the source's policy) everything it brings in,
       and indexes what it publishes. What it held back waits in Documents → Review, not processed until approved. */
@@ -766,7 +766,7 @@
       { label: 'Read', st: done && b.failed ? 'warn' : st, spin: live, n: `${fmtNum(b.read)} / ${fmtNum(tot)}`, pct: pct(b.read, tot),
         note: b.failed ? `${fmtNum(b.failed)} couldn’t be read · see Issues` : 'Text, tables and structure' },
       { label: 'Classified', st, n: fmtNum(b.classified), pct: pct(b.classified, tot),
-        note: `Against your topics · ${fmtNum(b.topics.filed)} filed under a topic` },
+        note: `Against your classification schemes · ${fmtNum(b.concepts.filed)} filed under a concept` },
       { label: 'Decided', st, n: fmtNum(gate), pct: pct(gate, tot),
         note: [POLICY[pol].label, b.review && `${fmtNum(b.review)} held for review`, b.declined && `${fmtNum(b.declined)} declined`].filter(Boolean).join(' · ') },
       { label: 'Indexed', st, n: fmtNum(b.published), pct: pct(b.published, tot), note: 'What it published, searchable as soon as it’s indexed' },
@@ -783,15 +783,15 @@
     const head = `<section class="drawer__section"><div class="row gap-8 wrap mb-16">${runStatus(r)}</div>
       <div class="card card--secondary src-live"><div class="row between gap-12"><span class="medium">${esc(`${fmtNum(b.read)} of ${plural(tot, 'file')} read`)}</span><span class="num t-sm muted">${bfPct(b)}%</span></div>${progress(bfPct(b), paused ? 'warning' : live ? '' : 'success', 'First sync progress')}<div class="bf-meta">${pace.map(x => `<span>${esc(x)}</span>`).join(' · ')}</div></div></section>`;
     const issues = (b.issues || []).length ? sec('Issues', list(b.issues.map(([, label, n, fix]) => item({ lead: itemIcon('alert', 'warning', 'sm'), title: esc(label), desc: esc(fix), meta: `<span class="num">${fmtNum(n)}</span>` })))) : '';
-    const T = b.topics, sum = Math.max(1, T.filed + T.confirm + T.none);
-    const parts = [['filed', 'Filed under a topic', T.filed], ['confirm', 'Topic to confirm', T.confirm], ['none', 'No topic yet', T.none]];
+    const T = b.concepts, sum = Math.max(1, T.filed + T.confirm + T.none);
+    const parts = [['filed', 'Filed under a concept', T.filed], ['confirm', 'Awaiting review', T.confirm], ['none', 'Not classified', T.none]];
     const split = `<div class="bf-split" role="img" aria-label="${esc(parts.map(([, l, n]) => `${l} ${fmtNum(n)}`).join(', '))}">${parts.map(([k, , n]) => n ? `<span class="bf-split__seg bf-split__seg--${k}" style="width:${(n / sum * 100).toFixed(2)}%"></span>` : '').join('')}</div>
       <ul class="bf-legend">${parts.map(([k, l, n]) => `<li><span class="bf-legend__dot bf-split__seg--${k}" aria-hidden="true"></span><span class="grow">${esc(l)}</span><span class="num">${fmtNum(n)}</span></li>`).join('')}</ul>
-      <p class="description mt-8">Published either way. Confirming a topic only changes where people browse a document.</p>`;
+      <p class="description mt-8">Published either way. Confirming a concept only changes where people browse a document.</p>`;
     const toConfirm = T.confirm + T.none;
     const batches = (D.reviewBatches || []).filter(x => x.run === r.id && x.status === 'open');
-    const quality = topicsHref('suggestions'), reviewTo = docsHref('review');
-    const cls = sec('Classification', split, toConfirm && canReview() ? linkBtn('Confirm topics', { href: quality, act: 'src-leave', data: { to: quality }, icon: 'arrow-up-right', size: 'sm' }) : '');
+    const quality = taxonomyHref('suggestions'), reviewTo = docsHref('review');
+    const cls = sec('Classification', split, toConfirm && canReview() ? linkBtn('Confirm concepts', { href: quality, act: 'src-leave', data: { to: quality }, icon: 'arrow-up-right', size: 'sm' }) : '');
     const held = b.review || batches.length
       ? list(batches.map(x => item({ lead: itemIcon(x.reason === 'personal' ? 'shield' : x.reason === 'version' ? 'git-compare' : 'copy', 'accent', 'sm'), title: esc(RB_REASON[x.reason] || x.reason), desc: esc(x.note || ''), meta: `<span class="num">${fmtNum(x.n)}</span>` })))
         + `<p class="description mt-8">${esc(`${fmtNum(b.review)} held, decided in batches by reason. They stay unpublished until someone decides.`)}</p>`

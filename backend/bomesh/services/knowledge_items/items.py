@@ -19,7 +19,7 @@ from sqlalchemy import ColumnElement, and_, case, false, func, literal, or_, sel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemRevision, ItemUpload, Tenant
+from bomesh.db.models import Concept, ConceptScheme, Item, ItemRevision, ItemUpload, Tenant
 from bomesh.errors import (
     AlreadyExists,
     FailedPrecondition,
@@ -42,15 +42,10 @@ from bomesh.services.kernel.idempotency import Idempotency
 from bomesh.services.kernel.listing import ListQuery
 from bomesh.services.kernel.retention import require_restorable
 from bomesh.services.kernel.workspaces import workspace_name
-from bomesh.services.knowledge_curation.topic_assignments import (
-    assistant_topic_ids,
-    record_topic_correction,
-)
 from bomesh.services.knowledge_items.collection_import import (
     FolderPlanner,
     load_folders,
 )
-from bomesh.services.knowledge_items.documents import tag_document
 from bomesh.services.knowledge_items.file_types import (
     ITEM_TYPE_MISMATCH,
     ItemTypeMismatchError,
@@ -76,9 +71,12 @@ from bomesh.services.knowledge_items.names import (
     parse_item,
 )
 from bomesh.services.knowledge_items.records import (
+    Applicability,
     CollectionImportChange,
     CollectionImportResult,
     CollectionImportRow,
+    ConceptKey,
+    Issuance,
     ItemPage,
     ItemRecord,
     NewDocument,
@@ -100,6 +98,14 @@ from bomesh.services.knowledge_items.support import (
     require_document,
     require_no_open_contribution,
 )
+from bomesh.services.taxonomy.assignments import ConceptEntry, set_document_concepts
+from bomesh.services.taxonomy.profiles import (
+    ApplicabilityInput,
+    IssuanceInput,
+    set_applicability,
+    set_issuance,
+)
+from bomesh.services.taxonomy.names import concept_name
 from bomesh.storage import ObjectNotFoundError, ObjectStorageError
 from bomesh.storage.keys import IMMUTABLE_CACHE_CONTROL, content_key
 
@@ -116,7 +122,9 @@ COLLECTION_PATHS = frozenset(
 )
 DOCUMENT_PATHS = frozenset(
     {
-        "document.topics",
+        "document.concepts",
+        "document.issuance",
+        "document.applicability",
         "document.summary",
         "document.languageCode",
         "document.owner",
@@ -201,7 +209,6 @@ class KnowledgeItemService:
                 summary=document.summary,
                 language_code=document.language_code,
                 owner_id=document.owner_id,
-                topics=document.topics,
             ),
         )
         item_id = await self._create(
@@ -387,10 +394,6 @@ class KnowledgeItemService:
         )
         if source is not None:
             await self._reuse(session, workspace_id, item, source, ctx=ctx)
-        if facet.topics:
-            await tag_document(
-                session, workspace_id, item.id, facet.topics, created_by_user_id=ctx.user_id
-            )
         return item
 
     @staticmethod
@@ -692,20 +695,28 @@ class KnowledgeItemService:
                         "A PERSONAL collection cannot be shared.", reason="PERSONAL_COLLECTION"
                     )
                 item.inherit_access = bool(value) and item.parent_item_id is not None
-            case "document.topics":
-                assistant = await assistant_topic_ids(session, item.id)
-                chosen = await tag_document(
-                    session, workspace_id, item.id, tuple(value or ()), created_by_user_id=ctx.user_id
-                )
-                if assistant:
-                    await record_topic_correction(
-                        session,
-                        tenant_id=workspace_id,
-                        item_id=item.id,
-                        assistant_topic_ids=assistant,
-                        chosen_topic_ids=chosen,
-                        actor_user_id=ctx.user_id,
+            case "document.concepts":
+                entries = [
+                    ConceptEntry(
+                        concept_id=await _concept_id(
+                            session, workspace_id, choice.concept, field="document.concepts"
+                        ),
+                        primary=choice.primary,
                     )
+                    for choice in value or ()
+                ]
+                await set_document_concepts(session, ctx, item.id, entries)
+            case "document.issuance":
+                await set_issuance(
+                    session, item.id, workspace_id, await _issuance_input(session, workspace_id, value)
+                )
+            case "document.applicability":
+                await set_applicability(
+                    session,
+                    item.id,
+                    workspace_id,
+                    await _applicability_input(session, workspace_id, value),
+                )
             case "document.owner":
                 if value is None:
                     item.owner_user_id = None
@@ -1435,6 +1446,79 @@ async def _require_on_boundaries(
 async def _require_member(ctx: RequestContext, workspace_id: UUID, user_id: UUID, *, field: str) -> None:
     if not await ctx.authorizer.is_active_member(Principal(user_id), workspace_id):
         raise InvalidArgument.for_field(field, "The member is not an active member of this workspace.")
+
+
+async def _concept_id(
+    session: AsyncSession, workspace_id: UUID, key: ConceptKey, *, field: str
+) -> UUID:
+    """The concept ``key`` (scheme code, notation) names in this workspace."""
+    scheme_code, notation = key
+    concept_id = await session.scalar(
+        select(Concept.id)
+        .join(ConceptScheme, ConceptScheme.id == Concept.scheme_id)
+        .where(
+            ConceptScheme.tenant_id == workspace_id,
+            ConceptScheme.deleted_at.is_(None),
+            ConceptScheme.code == scheme_code,
+            Concept.notation == notation,
+            Concept.deleted_at.is_(None),
+        )
+    )
+    if concept_id is None:
+        raise InvalidArgument.for_field(
+            field, f"'{concept_name(workspace_id, scheme_code, notation)}' does not exist."
+        )
+    return concept_id
+
+
+async def _issuance_input(
+    session: AsyncSession, workspace_id: UUID, issuance: Issuance | None
+) -> IssuanceInput:
+    """UpdateItem ``document.issuance`` with concepts resolved; None clears it."""
+    if issuance is None:
+        return IssuanceInput()
+    return IssuanceInput(
+        issuer_id=(
+            await _concept_id(session, workspace_id, issuance.issuer, field="document.issuance.issuer")
+            if issuance.issuer
+            else None
+        ),
+        campus_id=(
+            await _concept_id(session, workspace_id, issuance.campus, field="document.issuance.campus")
+            if issuance.campus
+            else None
+        ),
+        number=_text(issuance.number),
+        issued_on=issuance.issued_on,
+        effective_on=issuance.effective_on,
+        supersedes=issuance.supersedes,
+    )
+
+
+async def _applicability_input(
+    session: AsyncSession, workspace_id: UUID, applicability: Applicability | None
+) -> ApplicabilityInput:
+    """UpdateItem ``document.applicability`` with concepts resolved; None clears it."""
+    if applicability is None:
+        return ApplicabilityInput()
+    return ApplicabilityInput(
+        level=applicability.level,
+        unit_ids=tuple(
+            [
+                await _concept_id(session, workspace_id, key, field="document.applicability.units")
+                for key in applicability.units
+            ]
+        ),
+        program_ids=tuple(
+            [
+                await _concept_id(
+                    session, workspace_id, key, field="document.applicability.programs"
+                )
+                for key in applicability.programs
+            ]
+        ),
+        cohorts=applicability.cohorts,
+    )
 
 
 async def _discoverable_root(

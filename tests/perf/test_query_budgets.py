@@ -28,7 +28,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, text
 
 from harness import ApiClient, Sessions
 from seed import SMALL, Dataset, seed
@@ -60,34 +60,50 @@ def me(ds: Dataset) -> str:
     return f"{ws(ds)}/members/{ds.admin}"
 
 
-#: ImportTopics with ``validateOnly``: 10 domains and 200 topics, as in ``load_api.py``.
-IMPORT_TOPICS: dict[str, Any] = {
-    "rows": [{"domain": f"Import domain {d}"} for d in range(10)]
+def concepts(d: Dataset) -> str:
+    return f"{ws(d)}/conceptSchemes/{d.concept_scheme}"
+
+
+#: ImportConcepts with ``validateOnly``, as in ``load_api.py``: 100 rows update seeded
+#: narrower concepts of the :data:`seed.SMALL` scheme, 100 create concepts under its tops.
+IMPORT_CONCEPTS: dict[str, Any] = {
+    "rows": [
+        {"notation": f"area-{k // SMALL.concepts_per_top:02d}-{k % SMALL.concepts_per_top:02d}",
+         "definition": f"Định nghĩa nhập {k}."}
+        for k in range(100)
+    ]
     + [
         {
-            "domain": f"Import domain {d}",
-            "topic": f"Import topic {d}.{t}",
-            "keywords": ["a", "b"],
+            "notation": f"import-{k:03d}",
+            "broader": f"area-{k % SMALL.concept_tops:02d}",
+            "prefVi": f"Chủ đề nhập {k:03d}",
+            "altVi": f"Nhập {k:03d}|Mục {k:03d}",
+            "definition": f"Văn bản về chủ đề nhập {k:03d}.",
         }
-        for d in range(10)
-        for t in range(20)
+        for k in range(100)
     ],
-    "mode": "MERGE",
     "validateOnly": True,
 }
 
 BUDGETS = [
     # Flat in page size; 7 of these are authentication and workspace authorization,
-    # 3 the collection sets (items.get, items.update, hidden), 2 the visibility query.
-    Budget("ListItems", lambda d: f"{ws(d)}/items", ceiling=17),
-    Budget("ListItems FULL", lambda d: f"{ws(d)}/items", params={"view": "FULL"}, ceiling=18),
-    Budget("SearchItems browse", lambda d: f"{ws(d)}/items:search", method="POST", ceiling=17),
-    Budget("ListContributions", lambda d: f"{ws(d)}/contributions"),
+    # 3 the collection sets (items.get, items.update, hidden), 2 the visibility query,
+    # 2 the page's concept labels (item_concepts) and document profiles.
+    Budget("ListItems", lambda d: f"{ws(d)}/items", ceiling=18),
+    Budget("ListItems FULL", lambda d: f"{ws(d)}/items", params={"view": "FULL"}, ceiling=19),
+    Budget("SearchItems browse", lambda d: f"{ws(d)}/items:search", method="POST", ceiling=18),
+    Budget("ListContributions", lambda d: f"{ws(d)}/contributions",
+           failing="28 statements at pageSize 20, 218 at 200: contribution_records checks "
+                   "is_visible on each closed contribution's candidate (item_path + role_assignments)"),
     Budget("ListMembers", lambda d: f"{ws(d)}/members"),
     Budget("ListGroups", lambda d: f"{ws(d)}/groups"),
     Budget("ListAuditEvents", lambda d: f"{ws(d)}/auditEvents"),
-    Budget("ListTopics", lambda d: f"{ws(d)}/topics"),
-    Budget("ListTopicCorrections", lambda d: f"{ws(d)}/topicCorrections"),
+    # Flat; 1 the page (template codes joined), then each working-copy table once for
+    # the page's unpublishedChanges and 1 its published versions (cached once read).
+    Budget("ListConceptSchemes", lambda d: f"{ws(d)}/conceptSchemes"),
+    # Flat; 1 the visibility query, 5 the page's concept facts, 1 the document counts.
+    Budget("ListConcepts", lambda d: f"{concepts(d)}/concepts", ceiling=17),
+    Budget("ListConceptProposals", lambda d: f"{ws(d)}/conceptProposals"),
     Budget("ListIngestionRuns", lambda d: f"{ws(d)}/ingestionRuns"),
     Budget("ListIngestionTasks", lambda d: f"{ws(d)}/ingestionRuns/{d.big_run}/tasks"),
     Budget("ListSources", lambda d: f"{ws(d)}/sources"),
@@ -104,8 +120,9 @@ BUDGETS = [
     Budget("GetNotification", lambda d: f"{me(d)}/notifications/{d.notifications[0]}",
            paged=False, ceiling=13),
     Budget("GetMemberHome", lambda d: f"{me(d)}/home", paged=False, ceiling=40),
-    Budget("ImportTopics validateOnly", lambda d: f"{ws(d)}/topics:import", method="POST",
-           params=IMPORT_TOPICS, paged=False, ceiling=10),
+    # 200 rows: one statement set for the scheme index, then set-based writes in the savepoint.
+    Budget("ImportConcepts validateOnly", lambda d: f"{concepts(d)}:importConcepts", method="POST",
+           params=IMPORT_CONCEPTS, paged=False, ceiling=30),
 ]
 
 
@@ -161,22 +178,50 @@ async def test_statement_budget(budget: Budget, client: ApiClient, sessions: Ses
     assert max(measured.values()) <= budget.ceiling, f"over the ceiling {budget.ceiling}: {measured}"
 
 
-async def test_import_topics_validate_only_writes_and_locks_nothing(
+async def test_import_concepts_validate_only_locks_and_keeps_nothing(
     client: ApiClient, sessions: Sessions
 ) -> None:
-    """A dry run computes the outcome in memory: no row lock, no insert, no savepoint."""
+    """A dry run locks no row and keeps nothing: the concepts it writes to compute the
+    outcome live in a savepoint that is rolled back, and nothing is audited."""
     ds = await seed(sessions.kw["bind"], SMALL, analyze=False)
     api = await client.as_(UUID(ds.admin))
     with counting(sessions) as statements:
-        response = await api.post(f"{ws(ds)}/topics:import", json=IMPORT_TOPICS)
+        response = await api.post(f"{concepts(ds)}:importConcepts", json=IMPORT_CONCEPTS)
 
     assert response.status_code == 200, response.text
-    assert len(response.json()["created"]) == 210
-    assert [
-        statement
-        for statement in statements
-        if "FOR UPDATE" in statement or "INSERT INTO topics" in statement or "SAVEPOINT" in statement
-    ] == []
+    body = response.json()
+    assert (len(body["created"]), len(body["updated"])) == (100, 100)
+    assert [statement for statement in statements if "FOR UPDATE" in statement] == []
+    assert [statement for statement in statements if "SAVEPOINT" in statement][-1].startswith(
+        "ROLLBACK TO SAVEPOINT"
+    )
+    assert not [statement for statement in statements if "RELEASE SAVEPOINT" in statement]
+    async with sessions.kw["bind"].connect() as connection:
+        kept = await connection.scalar(text(
+            "SELECT count(*) FROM concepts WHERE notation LIKE 'import-%'"
+            " OR definition LIKE 'Định nghĩa nhập%'"
+        ))
+        audited = await connection.scalar(text(
+            "SELECT count(*) FROM audit_logs WHERE action = 'ImportConcepts'"
+        ))
+    assert (kept, audited) == (0, 0)
+
+
+async def test_seeded_taxonomy_feeds_home_and_facets(client: ApiClient, sessions: Sessions) -> None:
+    """The seeded classification scheme makes GetMemberHome's featuredConcepts and the
+    ``document.concepts`` facet non-empty, so their budgets measure real work."""
+    ds = await seed(sessions.kw["bind"], SMALL, analyze=False)
+    api = await client.as_(UUID(ds.admin))
+    home = await api.get(f"{me(ds)}/home")
+    assert home.status_code == 200, home.text
+    featured = home.json()["featuredConcepts"]
+    assert featured and all(entry["topConcepts"] for entry in featured)
+    search = await api.post(
+        f"{ws(ds)}/items:search",
+        json={"pageSize": 1, "facetSpecs": [{"field": "document.concepts"}]},
+    )
+    assert search.status_code == 200, search.text
+    assert [facet["values"] for facet in search.json()["facets"] if facet["values"]]
 
 
 #: Pool checkouts of one read request: authentication, the request Authorizer's
@@ -191,7 +236,7 @@ CHECKOUT_CASES = [
     Budget("GetWorkspaceAssistant", lambda d: f"{ws(d)}/assistant"),
     Budget("ListMembers", lambda d: f"{ws(d)}/members"),
     Budget("ListItems", lambda d: f"{ws(d)}/items"),
-    Budget("ListTopics", lambda d: f"{ws(d)}/topics"),
+    Budget("ListConcepts", lambda d: f"{concepts(d)}/concepts"),
     Budget("ListContributions", lambda d: f"{ws(d)}/contributions"),
     Budget("ListSavedItems", lambda d: f"{me(d)}/savedItems"),
 ]

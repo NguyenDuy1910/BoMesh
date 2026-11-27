@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -69,65 +69,139 @@ class IndexingContext(BaseModel):
 
 
 #: ``(phase, done, total)`` while one Item is indexed: ``classifying`` (``0/1``
-#: then ``1/1``, only when a classification is asked for and a contextualizer is
-#: configured), ``contextualizing`` and ``embedding`` count chunks, ``storing``
-#: reports the whole write. It is an observer only; it must not raise or block.
+#: then ``1/1``, only when the classification asks the model and a
+#: contextualizer is configured), ``contextualizing`` and ``embedding`` count
+#: chunks, ``storing`` reports the whole write. It is an observer only; it must
+#: not raise or block.
 IndexProgress: TypeAlias = Callable[[str, int, int], None]
 
 
 @dataclass(frozen=True, slots=True)
-class TopicCandidate:
-    """One topic a Document may be classified under (a ``topics`` row) and its signals."""
+class PromptConcept:
+    """One assignable concept as the shared prompt prefix lists it."""
 
-    id: str
+    #: Short label unique in the request: the scheme's letter and a number (``D12``).
+    label: str
+    concept_id: str
+    #: The preferred label (Vietnamese, else the first).
+    name: str
+    #: The ancestors' names, ``IT › AI``; ``""`` for a top concept.
+    path: str
+    definition: str | None = None
+    scope_note: str | None = None
+    #: Alternative labels in every language; hidden labels are never shown.
+    alt_labels: tuple[str, ...] = ()
+    examples: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PromptScheme:
+    """One published classification scheme the model may be asked about."""
+
     code: str
     name: str
-    description: str | None = None
-    #: Display name of the domain the topic belongs to; ``None`` for a domain.
-    domain: str | None = None
-    keywords: tuple[str, ...] = ()
-    synonyms: tuple[str, ...] = ()
-    guidance: str | None = None
-    #: Titles of the topic's example documents.
-    examples: tuple[str, ...] = ()
-    #: Rules: Collection Item IDs whose subtree, and source codes whose
-    #: documents, get this topic without asking the model.
-    rule_collections: tuple[str, ...] = ()
-    rule_sources: tuple[str, ...] = ()
+    #: Label prefix, unique in the request (``D``, ``F``, ``T``, ``A``).
+    letter: str
+    version: int
+    min_labels: int
+    max_labels: int | None
+    has_primary: bool
+    #: Every assignable concept, in display order.
+    concepts: tuple[PromptConcept, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PromptCandidate:
+    """One shortlisted concept of a scheme in the document part, with its signals."""
+
+    label: str
+    #: ``(kind, score)`` with kind ``lexical``, ``card``, ``knn`` or ``prior``, score 0..1, nonzero only.
+    scores: tuple[tuple[str, float], ...]
+    #: The combined score, 0..1.
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class SchemeTask:
+    """One Document's state for one scheme in scope."""
+
+    scheme: str
+    #: Labels the rules settled: context for the model, never asked.
+    settled: tuple[str, ...] = ()
+    #: Whether the model must answer this scheme.
+    ask: bool = False
+    #: The only labels the model may pick; empty with ``ask``: any label of the scheme.
+    shortlist: tuple[PromptCandidate, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SectionExcerpt:
+    """A level-1 section offered for section-level labels."""
+
+    #: ``S1``.. in the prompt.
+    label: str
+    #: The Structured Document ref stored as ``item_concepts.section_ref``.
+    ref: str
+    heading: str
+    #: The section's first 600 characters.
+    text: str
+
+
+#: Issuance fields the model may be asked for when the rules did not find them.
+METADATA_FIELDS = ("number", "issue_date", "effective_date", "issuer", "applies_to")
 
 
 @dataclass(frozen=True, slots=True)
 class ClassificationRequest:
-    """CLASSIFYING input: the candidate topics, the run's note and, for one
-    document, the candidates its rules settle (then the model is not asked)."""
+    """CLASSIFYING input for one Document: the shared prefix (every published
+    scheme and the run's note, identical for every document of a run) and this
+    Document's tasks, sections and metadata asks."""
 
-    candidates: tuple[TopicCandidate, ...]
+    schemes: tuple[PromptScheme, ...]
     note: str | None = None
-    settled: tuple[TopicCandidate, ...] = ()
+    #: Scheme versions, active rules and classifier version; part of the reuse key.
+    fingerprint: str = ""
+    tasks: tuple[SchemeTask, ...] = ()
+    #: Non-empty only when section-level labels are asked.
+    sections: tuple[SectionExcerpt, ...] = ()
+    #: The scheme code the section labels belong to.
+    section_scheme: str | None = None
+    #: The :data:`METADATA_FIELDS` the rules did not find.
+    metadata_asks: tuple[str, ...] = ()
 
-    def for_document(
-        self, collection_ids: Collection[str], source: str | None
-    ) -> ClassificationRequest:
-        """This request for a document in ``collection_ids`` (its ancestors) from
-        ``source``: every candidate with a matching rule settles it."""
+    @property
+    def needs_model(self) -> bool:
+        return any(task.ask for task in self.tasks)
 
-        settled = tuple(
-            candidate
-            for candidate in self.candidates
-            if any(collection in collection_ids for collection in candidate.rule_collections)
-            or (source is not None and source in candidate.rule_sources)
-        )
-        return ClassificationRequest(self.candidates, self.note, settled)
+
+@dataclass(frozen=True, slots=True)
+class SchemeAnswer:
+    """The model's answer for one asked scheme."""
+
+    #: Allowed labels only, primary first, at most the scheme's ``max_labels``.
+    labels: tuple[str, ...] = ()
+    #: The model said nothing fits.
+    none: bool = False
+    #: ``high``, ``medium`` or ``low``.
+    certainty: str | None = None
+    #: A short quote from the document.
+    evidence: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class DocumentClassification:
-    """What CLASSIFYING chose for one Document: the candidates that apply
-    (possibly none), a one- or two-sentence summary and a clean title."""
+    """What the CLASSIFYING model call answered for one Document."""
 
-    topics: tuple[TopicCandidate, ...] = ()
+    #: By scheme code; every asked scheme, nothing else.
+    schemes: Mapping[str, SchemeAnswer] = field(default_factory=dict)
+    #: Section ref -> labels of the request's ``section_scheme``.
+    sections: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Answered ``metadata_asks`` as raw strings (dates ``YYYY-MM-DD``).
+    metadata: Mapping[str, str] = field(default_factory=dict)
     summary: str | None = None
     title: str | None = None
+    #: Labels the model named outside what it was allowed (dropped and logged).
+    dropped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,9 +238,9 @@ class WindowContexts:
 class ClassificationCache(Protocol):
     """Classification answers already paid for, by reuse key; best effort.
 
-    A key names everything an answer depends on (model, prompt, taxonomy,
-    note, the document's part), so a stored answer is the one the model would
-    be asked for again.
+    A key names everything an answer depends on (model, prompt, schemes,
+    rules, note, the document's part), so a stored answer is the one the model
+    would be asked for again.
     """
 
     async def get(self, key: str) -> str | None: ...
@@ -204,7 +278,10 @@ class ChunkContextGenerator(Protocol):
         request: ClassificationRequest,
         title: str | None = None,
         cache: ClassificationCache | None = None,
-    ) -> DocumentClassification: ...
+    ) -> DocumentClassification:
+        """The model's answer for the asked schemes, sections and metadata of
+        ``request``; raises when the answer stays unreadable after one retry."""
+        ...
 
 
 class ChunkContext(BaseModel):
@@ -252,9 +329,14 @@ class ContextualChunk(BaseModel):
 from .contextualization import (
     ContextualChunkBuilder,
     build_contextual_chunks,
+    classification_context,
     sample_document_context,
 )
-from .semantic_contextualizer import SemanticContextualizer, classification_prompt
+from .semantic_contextualizer import (
+    ClassificationPrompt,
+    SemanticContextualizer,
+    classification_prompt,
+)
 
 class EmbeddingRejectedError(RuntimeError):
     """The embedding provider refused the request itself, not the moment.
@@ -314,11 +396,19 @@ class ItemContentIndex(Protocol):
         collection_item_ids: tuple[str, ...],
         editable_collection_ids: tuple[str, ...],
         document_item_ids: tuple[str, ...] = (),
+        within_item_ids: tuple[str, ...] | None = None,
     ) -> list[ContextualChunk]:
         """Every query's fused candidates: points of ``collection_item_ids``
         that are published, or lie in ``editable_collection_ids``, and every
-        point of ``document_item_ids``. A pre-filter only; callers re-check
-        every hit in PostgreSQL."""
+        point of ``document_item_ids``; ``within_item_ids`` (when not ``None``)
+        narrows that scope to those items (``document_item_ids`` widens it). A
+        pre-filter only; callers re-check every hit in PostgreSQL."""
+
+    async def get_item_chunks(
+        self, *, tenant_id: str, chunks: Mapping[str, Collection[int]]
+    ) -> list[ContextualChunk]:
+        """The live chunks at the given ``chunk_index`` values of each Item (the
+        caller already authorized those Items), per Item in source order."""
 
 
 from .index import ItemIndex
@@ -329,10 +419,12 @@ __all__ = [
     "DEFAULT_HYBRID_CANDIDATE_LIMIT",
     "DENSE_VECTOR_NAME",
     "INDEX_SCHEMA_VERSION",
+    "METADATA_FIELDS",
     "SPARSE_VECTOR_NAME",
     "ChunkContext",
     "ChunkContextGenerator",
     "ClassificationCache",
+    "ClassificationPrompt",
     "ClassificationRequest",
     "ContextualChunk",
     "ContextualChunkBuilder",
@@ -344,9 +436,17 @@ __all__ = [
     "ItemContentIndex",
     "ItemPayloadState",
     "ItemIndex",
+    "ModelUsage",
+    "PromptCandidate",
+    "PromptConcept",
+    "PromptScheme",
+    "SchemeAnswer",
+    "SchemeTask",
+    "SectionExcerpt",
     "SemanticContextualizer",
-    "TopicCandidate",
+    "WindowContexts",
     "build_contextual_chunks",
+    "classification_context",
     "classification_prompt",
     "sample_document_context",
 ]

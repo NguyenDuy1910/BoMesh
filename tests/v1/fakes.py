@@ -270,6 +270,7 @@ class FakeIndexBackend:
         document_item_ids: Iterable[str],
         limit: int,
         candidate_limit: int,
+        within_item_ids: Iterable[str] | None = None,
     ) -> list[FakePoint]:
         if not queries:
             raise ValueError("at least one query is required")
@@ -278,6 +279,7 @@ class FakeIndexBackend:
         collections = set(collection_item_ids)
         editable = set(editable_collection_ids)
         documents = set(document_item_ids)
+        within = None if within_item_ids is None else set(within_item_ids)
         terms = {term for text, _ in queries for term in _terms(text)}
         scored: list[FakePoint] = []
         for point in self.points.values():
@@ -288,6 +290,8 @@ class FakeIndexBackend:
                 point.payload.get("published") is not False or collection in editable
             )
             if not in_collections and point.payload.get("item_id") not in documents:
+                continue
+            if within is not None and point.payload.get("item_id") not in within:
                 continue
             overlap = len(terms & _terms(str(point.payload.get("contextual_text", ""))))
             if overlap:
@@ -310,6 +314,23 @@ class FakeIndexBackend:
             and point.payload.get("item_id") == item_id
             and (not chunk_id or point.payload.get("chunk_id") == chunk_id)
         ][:limit]
+
+    async def get_chunk_points(self, *, tenant_id: str, chunks: dict[str, list[int]]) -> list[FakePoint]:
+        return [
+            point
+            for point in self.points.values()
+            if self._live(point, tenant_id)
+            and point.payload.get("chunk_index") in chunks.get(str(point.payload.get("item_id")), ())
+        ]
+
+    async def previous_item_points(
+        self, *, item_id: str, tenant_id: str
+    ) -> list[tuple[dict[str, Any], list[float] | None]]:
+        return [
+            (dict(point.payload), list(point.vector) or None)
+            for _, point in self._item_points(item_id, tenant_id)
+            if self._live(point, tenant_id)
+        ]
 
     async def tombstone_item_points(self, item_id: str, *, tenant_id: str) -> None:
         await self.set_item_payload(item_id, tenant_id=tenant_id, payload={"is_deleted": True})

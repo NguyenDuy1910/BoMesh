@@ -16,6 +16,7 @@ from bomesh.storage.keys import (
     export_key,
     file_prefix,
     source_content_id,
+    taxonomy_cards_key,
     workspace_prefix,
 )
 
@@ -29,6 +30,9 @@ def test_a_key_names_its_workspace_part_and_file() -> None:
     )
     assert export_key("hcmute", operation) == f"workspaces/hcmute/exports/{operation}.csv"
     assert export_key(None, operation) == f"platform/exports/{operation}.csv"
+    assert taxonomy_cards_key("hcmute", "domain", 3, "openai/Text-Embedding-3-Large") == (
+        "workspaces/hcmute/taxonomies/domain/3/cards-openai-text-embedding-3-large.json"
+    )
 
 
 def test_a_workspace_owns_only_its_prefix_and_a_file_its_folder() -> None:
@@ -38,6 +42,7 @@ def test_a_workspace_owns_only_its_prefix_and_a_file_its_folder() -> None:
         derived_key("hcmute", content, STRUCTURE, 1, "0123456789abcdef.json.gz"),
         asset_key("hcmute", MAP_BACKGROUND, uuid4()),
         export_key("hcmute", uuid4()),
+        taxonomy_cards_key("hcmute", "domain", 1, "text-embedding-3-small"),
     ]
     assert all(key.startswith(workspace_prefix("hcmute")) for key in keys)
     # A code that extends another's is a different folder.

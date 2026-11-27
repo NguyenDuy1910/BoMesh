@@ -34,7 +34,7 @@ Home (plain page, one centred column, max 1,040 px; no hero box, no texture)
 │     │[💬 Học phí]     │ │[◫ In CSDL]      │ │[# More on …]    │ │[◉ Most read]    │   reason over the cover
 │     PDF title, 2-line summary, collection · age · ✓
 └── Explore by domain                                                    All 26 domains → | Browse knowledge →
-      [icon] Học vụ & Quy chế · 26 documents · 3 new   (description, three topic chips)   ×6
+      [icon] Học vụ & Quy chế · 26 documents · 3 new   (description, three concept chips)   ×6
 ```
 
 ## Design references
@@ -80,15 +80,15 @@ Four documents the caller can read and hasn't saved or opened yet. Each card sho
 | --- | --- |
 | *starter title* (💬, e.g. "Học phí") | The document that best answers one of the caller's starter questions. The question's words are weighted by rarity across the readable pool, and title hits count double, so "học phí" outweighs "học". It counts only if it covers at least 20 % of the question, so task-like starters ("what did students ask this week?") get no document. |
 | *In {space}* | Linked to one of the caller's spaces (`contexts`), newest first |
-| *More on {topic}* | Shares a topic with what the caller recently read |
+| *More on {concept}* | Shares a concept with what the caller recently read |
 | *Most read* | Most opened, limited to the domains of the starter answers and of what they read, so a newcomer never gets another faculty's exam |
 
 Order: space, starter, related, starter, starter, space, related, then most read; the first four distinct documents are shown. A newcomer with no history gets starter answers plus the most read in those domains. A card is Browse's document card (`X.res.thumb` cover, type icon, title, 2-line AI summary, collection, age, verified) with the reason chip over the cover. Selecting it opens the document preview; the bookmark appears on hover (always on touch).
 
 ### Explore by domain
-- The taxonomy's domains (`topicTree`) that hold readable documents, largest first, six at most.
-- Each card shows the domain icon in its colour, name, description (*Shown on Home's domain cards*, edited in Knowledge Studio → Topics), document count, "{n} new" (updated in 30 days) and its three largest topics.
-- The card opens Knowledge filtered to the domain; a topic chip opens that topic. *All {n} domains* (or *Browse knowledge*) opens Knowledge.
+- The top concepts of the first classification scheme (`firstScheme()`, Lĩnh vực at UTE, Subject in enterprise workspaces; `topConcepts`) that hold readable documents, largest first, six at most.
+- Each card shows the concept icon in its colour, name, definition (edited in Knowledge Studio → Classification), document count, "{n} new" (updated in 30 days) and its three largest narrower concepts.
+- The card opens Knowledge filtered to the concept (the scheme's pill); a narrower-concept chip opens that concept. *All {n} domains* (or *Browse knowledge*) opens Knowledge.
 
 ### Not on Home: what changed lately
 A "Recently updated" list was removed: it repeated Browse (sorted by Recently updated) and competed with the picks. What's new shows where it helps a decision — each domain card's "{n} new" — and Knowledge sorts by update.
@@ -132,8 +132,8 @@ UTE has a **New student** persona (Trương Gia Bảo, K25 · CNTT, joined two d
 
 `GetMemberHome` (`members/{member}/home`, `MemberHome` in `openapi.yaml`) carries the page:
 - `starterPrompts[] {title, prompt}` → suggestions (the short title on the pill, the prompt fills the box);
-- `recommended[].reason {kind, label}` → picks: `STARTER_PROMPT` (label = the starter's title), `FROM_YOUR_SPACE` ("In {space}"), `BECAUSE_YOU_READ` / `SAVED_TOPIC` ("More on {topic}"), `POPULAR` ("Most read"); the client words the label. Cards read the document through `BatchGetItems`, as Browse does;
-- `topicDomains[]` (`description`, `icon`, `color`, `documentCount`, `newDocumentCount` — changed in 30 days, `topTopics`) → domains;
+- `recommended[].reason {kind, label}` → picks: `STARTER_PROMPT` (label = the starter's title), `FROM_YOUR_SPACE` ("In {space}"), `BECAUSE_YOU_READ` and the saved-concept reason ("More on {concept}"), `POPULAR` ("Most read"); the client words the label. Cards read the document through `BatchGetItems`, as Browse does;
+- the domain list (`description`, `icon`, `color`, `documentCount`, `newDocumentCount` — changed in 30 days, largest narrower concepts) → domains; the preview reads the first classification scheme's top concepts;
 - `joinTime`, `counts.conversationCount`, `continue.recentItems`, `counts.savedItemCount` → Getting started (ask, open, save) and the welcome card (new members). Hiding Getting started and answering the welcome card are per-browser preferences, not stored;
 - `continue.recentItems` → Jump back in (covers from `DocumentFacet.cover`).
 

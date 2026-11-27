@@ -94,7 +94,26 @@ const SPECIAL: Record<string, string> = {
   CreateShare: "Đã chia sẻ liên kết",
   DeleteShare: "Đã ngừng chia sẻ liên kết",
   AcceptShare: "Đã tham gia bằng liên kết mời",
-  ConfirmTopicAssignments: "Đã xác nhận chủ đề cho tài liệu",
+  CreateConceptScheme: "Đã thêm một trục phân loại",
+  UpdateConceptScheme: "Đã sửa thiết lập một trục phân loại",
+  PublishConceptScheme: "Đã công bố một trục phân loại",
+  ApplyConceptSchemeTemplateChanges: "Đã áp dụng thay đổi của mẫu cho một trục phân loại",
+  ImportConcepts: "Đã nhập khái niệm",
+  CreateConcept: "Đã thêm một khái niệm",
+  UpdateConcept: "Đã sửa một khái niệm",
+  DeprecateConcept: "Đã ngừng dùng một khái niệm",
+  DeleteConcept: "Đã xóa một khái niệm nháp",
+  ConfirmConceptAssignments: "Đã xác nhận khái niệm được gợi ý",
+  RejectConceptAssignments: "Đã từ chối khái niệm được gợi ý",
+  AcceptConceptProposal: "Đã chấp nhận một đề xuất phân loại",
+  RejectConceptProposal: "Đã từ chối một đề xuất phân loại",
+  CreateConceptGroup: "Đã thêm một nhóm khái niệm",
+  UpdateConceptGroup: "Đã sửa một nhóm khái niệm",
+  DeleteConceptGroup: "Đã xóa một nhóm khái niệm",
+  CreateConceptRule: "Đã thêm một quy tắc phân loại",
+  UpdateConceptRule: "Đã sửa một quy tắc phân loại",
+  DeleteConceptRule: "Đã xóa một quy tắc phân loại",
+  ImportMemberAffiliations: "Đã nhập đơn vị và chương trình của thành viên",
   MergeItem: "Đã hợp nhất bản trùng lặp",
   RollbackItem: "Đã khôi phục phiên bản trước của một tài liệu",
   ReviseArtifact: "Đã cập nhật mục công việc",
@@ -202,7 +221,10 @@ const NOUN: Record<string, string> = {
   request: "yêu cầu",
   type: "loại",
   message: "tin nhắn",
-  topic: "chủ đề",
+  concept: "khái niệm",
+  scheme: "trục phân loại",
+  proposal: "đề xuất",
+  version: "phiên bản",
   contribution: "bài gửi",
   announcement: "thông báo chung",
   notification: "thông báo",
@@ -279,7 +301,11 @@ export function describeAction(action: string | undefined | null, item?: string)
   const code = String(action ?? "").trim();
   if (!code) return "Đã thực hiện một thao tác";
   if (SPECIAL[code]) return SPECIAL[code];
-  const words = code.replace(/Iam(?:Policy|Permissions)$/, "Access").match(/[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])/g);
+  // "ConceptScheme" is one thing (a trục phân loại), not a scheme of concepts.
+  const words = code
+    .replace(/Iam(?:Policy|Permissions)$/, "Access")
+    .replace("ConceptScheme", "Scheme")
+    .match(/[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])/g);
   const verb = words?.length ? VERB[words[0]] : undefined;
   if (!words || !verb) return "Đã thực hiện một thao tác";
   const nouns = words.slice(1).map((w) => singular(w.toLowerCase()));
@@ -295,9 +321,29 @@ export function describeAction(action: string | undefined | null, item?: string)
   return `Đã ${verb} ${article}${phrase}`;
 }
 
-export type TargetKind = "member" | "user" | "group" | "role" | "item" | "space" | "source" | "connection" | "settings" | "assistant" | "workspace" | "session" | "request" | "topic" | "contribution" | "artifact" | "other";
+export type TargetKind =
+  | "member"
+  | "user"
+  | "group"
+  | "role"
+  | "item"
+  | "space"
+  | "source"
+  | "connection"
+  | "settings"
+  | "assistant"
+  | "workspace"
+  | "session"
+  | "request"
+  | "scheme"
+  | "concept"
+  | "proposal"
+  | "rule"
+  | "contribution"
+  | "artifact"
+  | "other";
 
-/** What a target resource name points at, and its bare ID. */
+/** What a target resource name points at, and its bare ID (a concept's own ID, not its scheme's). */
 export function targetOf(name: string | undefined | null): { kind: TargetKind; id: string } {
   const parts = String(name ?? "").split("/");
   const id = parts[parts.length - 1] ?? "";
@@ -306,6 +352,7 @@ export function targetOf(name: string | undefined | null): { kind: TargetKind; i
   if (parts[0] === "users") return { kind: "user", id };
   if (parts[0] !== "workspaces") return { kind: "other", id };
   if (parts.length === 2) return { kind: "workspace", id };
+  if (parts[2] === "conceptSchemes") return parts[4] === "concepts" && parts[5] ? { kind: "concept", id: parts[5] } : { kind: "scheme", id: parts[3] ?? "" };
   const KINDS: Record<string, TargetKind> = {
     members: "member",
     groups: "group",
@@ -317,7 +364,8 @@ export function targetOf(name: string | undefined | null): { kind: TargetKind; i
     settings: "settings",
     assistant: "assistant",
     requests: "request",
-    topics: "topic",
+    conceptProposals: "proposal",
+    conceptRules: "rule",
     contributions: "contribution",
     artifacts: "artifact",
   };

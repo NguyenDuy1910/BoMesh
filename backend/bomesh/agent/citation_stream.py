@@ -263,10 +263,7 @@ def _process_citation_buffer(
         before, candidate = remaining[:start], remaining[start:]
         end = candidate.find("]]", 2)
         if end < 0:
-            if (
-                _CITATION_PREFIX.startswith(candidate)
-                or candidate.startswith(_CITATION_PREFIX)
-            ) and len(candidate) <= _MAX_MARKER_LENGTH:
+            if _may_become_marker(candidate):
                 if before:
                     emitted.append((before, None))
                 return emitted, candidate
@@ -275,20 +272,36 @@ def _process_citation_buffer(
         marker, remaining = candidate[: end + 2], candidate[end + 2 :]
         if before:
             emitted.append((before, None))
-        evidence_id = marker[len(_CITATION_PREFIX) : -2]
-        if marker.startswith(_CITATION_PREFIX):
+        body = marker[2:-2]
+        evidence_id = body.removeprefix(_CITATION_PREFIX[2:])
+        if body.startswith(_CITATION_PREFIX[2:]):
             # A citation marker only grounds anything when retrieval issued the
             # reference. An invented or stale one is dropped rather than shown:
             # the reader must never see an internal marker as prose, and it
             # must never become a clickable citation.
-            if evidence_id in evidence and all(
-                character.isalnum() or character in "_.:-"
-                for character in evidence_id
-            ):
+            if evidence_id in evidence and _is_reference(evidence_id):
                 emitted.append(("", evidence_id))
+        elif evidence_id in evidence and _is_reference(evidence_id):
+            # The model sometimes drops the ``cite:`` of the marker; an issued
+            # reference between brackets can only mean that citation.
+            emitted.append(("", evidence_id))
         else:
             emitted.append((marker, None))
     return emitted, ""
+
+
+def _is_reference(text: str) -> bool:
+    return bool(text) and all(character.isalnum() or character in "_.:-" for character in text)
+
+
+def _may_become_marker(candidate: str) -> bool:
+    """Whether an unclosed ``[[…`` could still end as a marker, so it is held instead of shown."""
+
+    if len(candidate) > _MAX_MARKER_LENGTH:
+        return False
+    if _CITATION_PREFIX.startswith(candidate) or candidate.startswith(_CITATION_PREFIX):
+        return True
+    return _is_reference(candidate[2:].removesuffix("]"))
 
 
 __all__ = ["CitationProjection"]

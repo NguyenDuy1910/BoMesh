@@ -171,8 +171,23 @@ class AssistantSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class Affiliation:
+    """``Member.affiliation``: personal data, read only by the member and holders of
+    ``members.update``. ``units``/``programs`` are concept names; ``source`` is
+    ``directory`` or ``admin`` (None without rows)."""
+
+    units: tuple[str, ...] = ()
+    programs: tuple[str, ...] = ()
+    cohort: int | None = None
+    source: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class MemberRecord:
-    """A workspace member as every slice shows people (``Member``)."""
+    """A workspace member as every slice shows people (``Member``).
+
+    ``affiliation`` is None when the caller may not read it.
+    """
 
     workspace_id: UUID
     user_id: UUID
@@ -184,6 +199,7 @@ class MemberRecord:
     roles: tuple[str, ...] = ()
     groups: tuple[str, ...] = ()
     personal_collection: str | None = None
+    affiliation: Affiliation | None = None
 
     @property
     def name(self) -> str:

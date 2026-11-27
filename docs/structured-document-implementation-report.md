@@ -47,7 +47,7 @@ thời gian.
 upload (CreateItem → signed URL → CompleteItemUpload)
   → IngestionRun (thủ công) → worker
   → PARSING   Docling → Structured Document (structure-v1), OCR scan bằng vision model
-  → CLASSIFYING  topic + tóm tắt (lưu classification-v1, dùng lại khi không đổi)
+  → CLASSIFYING  nhãn concept theo từng scheme + metadata + tóm tắt (lưu classification-v2, dùng lại khi không đổi)
   → CHUNKING  chunk theo block + contextual retrieval (LLM viết ngữ cảnh cho chunk văn bản)
   → EMBEDDING dense trên contextual_text
   → INDEXING  Qdrant: dense + BM25 trên contextual_text, ghi theo lô 256 điểm
@@ -70,14 +70,15 @@ truy vấn: dense + BM25 → RRF → lọc quyền trong PostgreSQL → (rerank,
   `CHUNKER_VERSION = "docling-hybrid-line-v5"`.
 - Key object storage: `workspaces/{code}/files/{content_id}/original |
   preview-v1 | thumbnail-v2 | structure-v1/{fp}.json.gz | images-v1/… |
-  ocr-v1/… | classification-v1/{key}.json`; `Workspace.code` bất biến.
+  ocr-v1/… | classification-v2/{key}.json`; `Workspace.code` bất biến.
 
 ### Benchmark
 
-Công cụ: `uv run python -m eval ingest --folder … --limit N --workspace hcmute
---email …` (đo ingest, kết quả ở `backend/eval/runs/ingest/…`), rồi
-`eval generate` và `eval run --reader <email>` (đo độ chính xác). Bộ câu hỏi:
-`backend/eval/datasets/khoa-xd-20`, `backend/eval/datasets/mixed-20`.
+Công cụ: `uv run python -m eval bench --suite ute-mixed` (một luồng: upload →
+ingest → đo thời gian, output, vùng tô trích dẫn → chấm câu hỏi; `--reuse` để
+chấm lại mà không ingest lại), `eval generate --suite …` để sinh câu hỏi. Một
+bộ duy nhất `backend/eval/suites/ute-mixed` (gitignore: dữ liệu workspace),
+thay cho các bộ cũ `khoa-xd-20`, `mixed-20`, `ute-knowledge`.
 
 | Lần đo | Tài liệu | Run | Tài liệu/phút | Agent đúng (câu có đáp án) | Từ chối đúng | Rò rỉ quyền |
 |---|---|---|---|---|---|---|
@@ -112,7 +113,7 @@ Công cụ: `uv run python -m eval ingest --folder … --limit N --workspace hcm
 
 1. **Cỡ chunk:** 256 là mặc định chưa tinh chỉnh. Đề xuất: đưa thành cấu hình
    (`BOMESH_CHUNK_MAX_TOKENS`), đếm bằng tokenizer thật của model embedding,
-   index lại 2 collection benchmark với 256/512/768 rồi so bằng `eval run`
+   chạy lại bộ `ute-mixed` với 256/512/768 rồi so bằng `eval bench`
    (khoảng $0,5–0,8).
 2. **Gộp câu trắc nghiệm trong phiếu khảo sát:** ghi `câu hỏi = phương án A,
    phương án B` thay cho từng `câu hỏi – phương án = 1`; ước tính giảm khoảng
@@ -406,7 +407,7 @@ nên agent trả lời sai ("Khoa Xây dựng 45 SV, 53,33%"; đúng là 132 SV,
 
 ## 12. Benchmark 20 tài liệu đầu của `Khoa Xây dựng`
 
-Chạy bằng `python -m eval ingest` (`evaluation.md` "Ingestion benchmark"),
+Chạy bằng lệnh ingest cũ (nay là `python -m eval bench`; `evaluation.md` "Ingestion and highlights"),
 worker chạy trong container `ingestion-worker` (`make worker`, API chạy
 `main.py --api-only`), 4 tài liệu song song.
 
@@ -468,7 +469,7 @@ agent đúng 19/24 câu trả lời được, từ chối đúng 3/4, 0 rò rỉ
 - **Bản xem trước bảng** (`REPRESENTATION_VERSION` 2): hàng/cột đếm từ A1, ô
   hiện như sheet định dạng; `.xls` thành TABLE như lúc parse. Phiên bản
   representation nằm trong processing version.
-- **Đo** (`python -m eval highlights`, sau reindex): bộ nhiều định dạng 2.249
+- **Đo** (lệnh highlights cũ, nay nằm trong `eval bench`, sau reindex): bộ nhiều định dạng 2.249
   chunk, 100% có vùng tô, 99,9% vùng tô chứa ≥80% chữ của chunk (22 chunk trên
   trang scan không đọc lại được); bộ Khoa Xây dựng 6.638 chunk, 100% / 100%.
 - **Bảng có kẻ trong PDF đánh máy** (`connector/processing/pdf_tables.py`,

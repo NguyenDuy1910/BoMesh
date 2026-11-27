@@ -43,9 +43,9 @@ export interface AboutPaneProps {
 }
 
 /**
- * About tab (preview `aboutPane`): details (type, topics, owner, collection, source/provenance, trust,
- * version, who can see it; Edit for editors), the source link and the collection's access for its
- * owners, then the version history (View an older version → `?v=`).
+ * About tab (preview `aboutPane`): details (type, concepts per classification scheme, owner, collection,
+ * source/provenance, trust, version, who can see it, then Thông tin văn bản; Edit for editors), the source link and
+ * the collection's access for its owners, then the version history (View an older version → `?v=`).
  */
 export function AboutPane({ resource: r, canEdit, revisions, viewing, current, onView }: AboutPaneProps) {
   const base = useItem(r.isPersonal ? null : r.base?.id);

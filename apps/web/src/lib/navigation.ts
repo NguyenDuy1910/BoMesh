@@ -95,17 +95,17 @@ export interface StudioAccess {
   managesCollections: boolean;
 }
 
-export type StudioSectionId = "documents" | "collections" | "topics" | "sources";
+export type StudioSectionId = "documents" | "collections" | "taxonomy" | "sources";
 
 /** [id, label, cluster, who may use it]; setup is listed in the order it's done: where → what about → what comes in. */
 const STUDIO_DEFS: readonly [StudioSectionId, Msg, "work" | "setup", (a: StudioAccess) => boolean][] = [
   ["documents", (m) => m.nav.documents, "work", (a) => a.can("contributions.review")],
   ["collections", (m) => m.nav.collections, "setup", (a) => a.managesCollections],
-  ["topics", (m) => m.nav.topics, "setup", (a) => a.can("topics.update")],
+  ["taxonomy", (m) => m.nav.taxonomy, "setup", (a) => a.can("conceptSchemes.update") || a.can("conceptProposals.decide")],
   ["sources", (m) => m.nav.sources, "setup", (a) => a.can("sources.list")],
 ];
 
-/** Knowledge Studio's sections the caller may use: Documents │ Collections · Topics · Sources. */
+/** Knowledge Studio's sections the caller may use: Documents │ Collections · Classification · Sources. */
 export function studioSections(access: StudioAccess): Section[] {
   const defs = STUDIO_DEFS.filter((d) => d[3](access));
   return defs.map(([id, label, cluster], i) => ({
@@ -116,7 +116,7 @@ export function studioSections(access: StudioAccess): Section[] {
   }));
 }
 
-const OLD_TABS = ["flow", "review", "quality", "details", "duplicates", "all", "library", "taxonomy", "master", "bases"];
+const OLD_TABS = ["flow", "review", "quality", "details", "duplicates", "all", "library", "master", "bases"];
 const QUALITY_PARTS = ["reverify", "details", "duplicates"];
 /** The retired `?life=` stage filter → Documents' views and All's filters (`processing=`, `pub=`); other stages drop. */
 const OLD_LIFE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
@@ -132,9 +132,9 @@ const OLD_LIFE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
 /**
  * Old Knowledge Studio addresses → the current one (preview `features/curation.js` `legacyOf`), null when `q` is
  * current. Review, Quality, Issues, Knowledge flow and their queues land in Documents' views (`view=all|processing|
- * review`; Quality is All's `quality=` filter, Issues is Processing); Taxonomy, Master data and classification rules in
- * Topics; corrections, confirmations and proposals in Topics → Suggestions; Library and All in Documents → All; Bases in
- * Collections. The Studio replaces the address with the result (no history entry).
+ * review`; Quality is All's `quality=` filter, Issues is Processing); Master data and classification rules in
+ * Classification (its first scheme); corrections, confirmations and proposals in Classification → Suggestions; Library
+ * and All in Documents → All; Bases in Collections. The Studio replaces the address with the result (no history entry).
  */
 export function studioAddress(q: Readonly<Record<string, string>>): Record<string, string> | null {
   const life = q.life ?? "";
@@ -147,9 +147,10 @@ export function studioAddress(q: Readonly<Record<string, string>>): Record<strin
   if (q.tab === "bases") return { ...n, tab: "collections" };
   const queue = q.queue || q.seg || (q.tab === "details" || q.tab === "duplicates" ? q.tab : "");
   const suggestions = queue === "confirm" || queue === "classify" || learn;
-  if (q.tab === "taxonomy" || q.tab === "master" || q.mode === "rules" || suggestions) {
+  if (q.tab === "master" || q.mode === "rules" || suggestions) {
     if (learn) delete n.node;
-    return { ...n, tab: "topics", view: suggestions ? "suggestions" : "topics" };
+    delete n.view;
+    return { ...n, tab: "taxonomy", ...(suggestions ? { view: "suggestions" } : {}) };
   }
   n.tab = "documents";
   const part = QUALITY_PARTS.find((p) => p === q.part || p === queue);

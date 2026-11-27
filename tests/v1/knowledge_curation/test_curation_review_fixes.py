@@ -1,18 +1,18 @@
 """Integration-review fixes: deleted approval targets, the approve etag, notification
-re-checks, per-caller topic counts, purge, replays and later revokes."""
+re-checks, readable contributions and source filters."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from bomesh.services.knowledge_curation.contributions import readable_contributions
-from bomesh.db.models import Contribution, ItemTopic, Topic
+from bomesh.db.models import Contribution
 from bomesh.iam.authorizer import Principal
+from bomesh.services.taxonomy.names import concept_name
 from curation_support import OWNER, Scene, error_reason, item_name
 
 pytestmark = pytest.mark.asyncio
@@ -91,7 +91,7 @@ async def test_approve_rejects_an_empty_etag(scene: Scene) -> None:
 # -- #24 approval facets go through KnowledgeItems ---------------------------------------
 
 
-async def test_approve_with_an_unknown_topic_is_invalid_and_changes_nothing(scene: Scene) -> None:
+async def test_approve_with_an_unknown_concept_is_invalid_and_changes_nothing(scene: Scene) -> None:
     candidate = await scene.candidate()
     await scene.mark_processed(candidate)
     body = await scene.submit(candidate)
@@ -99,7 +99,7 @@ async def test_approve_with_an_unknown_topic_is_invalid_and_changes_nothing(scen
 
     response = await reviewer.post(
         _url(body, ":approve"),
-        json={"etag": body["etag"], "topics": [f"workspaces/{scene.ws.id}/topics/nope"]},
+        json={"etag": body["etag"], "concepts": [concept_name(scene.ws.id, "domain", "nope")]},
     )
 
     assert response.json()["error"]["status"] == "INVALID_ARGUMENT"
@@ -142,95 +142,6 @@ async def test_reviewer_who_lost_the_role_can_no_longer_get_the_contribution(sce
     await scene.world.revoke(scene.reviewer, on=scene.kb)
 
     assert (await (await scene.as_(scene.reviewer)).get(_url(body))).status_code == 403
-
-
-# -- #17 per-caller documentCount ------------------------------------------------------
-
-
-async def _tag(scene: Scene, item: Any, topic: Topic) -> None:
-    async with scene.sessions.begin() as session:
-        session.add(ItemTopic(item_id=item.id, topic_id=topic.id))
-
-
-async def test_document_count_order_uses_the_callers_visibility(scene: Scene) -> None:
-    open_topic = await scene.topic("open", "Open")
-    hidden_topic = await scene.topic("hidden", "Hidden")
-    secret = await scene.world.make_collection(scene.ws)
-    await _tag(scene, await scene.world.make_document(scene.kb), open_topic)
-    for _ in range(3):
-        await _tag(scene, await scene.world.make_document(secret), hidden_topic)
-    params = {"orderBy": "documentCount desc"}
-
-    outsider = (await (await scene.as_(scene.outsider)).get(scene.url("topics"), params=params)).json()
-    admin = (await (await scene.as_(scene.admin)).get(scene.url("topics"), params=params)).json()
-
-    assert [(t["displayName"], t["documentCount"]) for t in outsider["topics"]] == [
-        ("Open", 1),
-        ("Hidden", 0),
-    ]
-    assert [(t["displayName"], t["documentCount"]) for t in admin["topics"]] == [
-        ("Hidden", 3),
-        ("Open", 1),
-    ]
-
-
-async def test_editors_count_their_visible_unpublished_documents(scene: Scene) -> None:
-    topic = await scene.topic("drafts", "Drafts")
-    await _tag(scene, await scene.world.make_document(scene.kb, published=False), topic)
-
-    reviewer = (await (await scene.as_(scene.reviewer)).get(scene.url("topics/drafts"))).json()
-    outsider = (await (await scene.as_(scene.outsider)).get(scene.url("topics/drafts"))).json()
-
-    assert (reviewer["documentCount"], outsider["documentCount"]) == (1, 0)
-
-
-# -- #21 purge -------------------------------------------------------------------------
-
-
-async def _age(scene: Scene, model: Any, code: str, days: int) -> None:
-    async with scene.sessions.begin() as session:
-        await session.execute(
-            update(model)
-            .where(model.tenant_id == scene.ws.id, model.code == code)
-            .values(deleted_at=datetime.now(UTC) - timedelta(days=days))
-        )
-
-
-async def test_purged_topics_are_gone(scene: Scene) -> None:
-    await scene.topic("old", "Old")
-    admin = await scene.as_(scene.admin)
-    await admin.delete(scene.url("topics/old"))
-    await _age(scene, Topic, "old", 31)
-
-    assert (await admin.post(scene.url("topics/old:undelete"), json={})).status_code == 404
-    assert (await admin.get(scene.url("topics/old"))).status_code == 404
-    listed = (await admin.get(scene.url("topics"), params={"showDeleted": "true"})).json()
-    assert listed.get("topics", []) == []
-
-
-async def test_recently_deleted_topics_still_restore(scene: Scene) -> None:
-    await scene.topic("recent", "Recent")
-    admin = await scene.as_(scene.admin)
-    await admin.delete(scene.url("topics/recent"))
-    await _age(scene, Topic, "recent", 29)
-
-    restored = await admin.post(scene.url("topics/recent:undelete"), json={})
-    assert restored.json()["state"] == "ACTIVE"
-
-
-# -- requestId replays -----------------------------------------------------------------
-
-
-async def test_create_topic_replays_its_request_id(scene: Scene) -> None:
-    admin = await scene.as_(scene.admin)
-    params = {"requestId": str(uuid4())}
-    first = await admin.post(scene.url("topics"), params=params, json={"displayName": "Ops"})
-    second = await admin.post(scene.url("topics"), params=params, json={"displayName": "Ops"})
-    reused = await admin.post(scene.url("topics"), params=params, json={"displayName": "Other"})
-
-    assert first.json()["name"] == second.json()["name"]
-    assert (reused.status_code, error_reason(reused)) == (400, "REQUEST_ID_REUSED")
-    assert (await admin.get(scene.url("topics"))).json()["totalSize"] == 1
 
 
 # -- #2 sources by code ----------------------------------------------------------------

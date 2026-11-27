@@ -14,10 +14,11 @@ import pytest
 from sqlalchemy import event, update
 
 from bomesh.db.engine import transaction_scope
-from bomesh.db.models import Item, ItemShortcut, ItemRevision, ItemTopic, ItemUpload, Topic, User
+from bomesh.db.models import Item, ItemConcept, ItemShortcut, ItemRevision, ItemUpload, User
 from bomesh.storage.keys import new_content_id
 from harness import ApiClient, Sessions, World
 from knowledge_support import item_name, ws_url
+from taxonomy_support import C, publish_scheme
 
 pytestmark = pytest.mark.asyncio
 
@@ -76,18 +77,24 @@ async def _decorate(
     uploader: User,
     links: list[tuple[Item, Item]] = (),  # type: ignore[assignment]
 ) -> None:
-    """Give documents topics, revisions and pending uploads, and add shortcuts."""
+    """Give documents concepts, revisions and pending uploads, and add shortcuts."""
+    workspace_id = documents[0].tenant_id
+    subject = await publish_scheme(
+        sessions, workspace_id, uploader.id, "subject", [C("finance", "Finance"), C("legal", "Legal")]
+    )
     async with transaction_scope(sessions) as session:
-        workspace_id = documents[0].tenant_id
-        topics = [
-            Topic(tenant_id=workspace_id, code=code, kind="domain", topic_name=code.title())
-            for code in ("finance", "legal")
-        ]
-        session.add_all(topics)
-        await session.flush()
         for position, document in enumerate(documents):
-            for topic in topics[: position % 3]:
-                session.add(ItemTopic(item_id=document.id, topic_id=topic.id))
+            for notation in ("finance", "legal")[: position % 3]:
+                session.add(
+                    ItemConcept(
+                        item_id=document.id,
+                        concept_id=subject[notation],
+                        scheme_id=subject.scheme_id,
+                        source="human",
+                        state="accepted",
+                        created_by_user_id=uploader.id,
+                    )
+                )
             if _WANTED.pop(id(document), "ready") == "pending":
                 session.add(
                     ItemUpload(
@@ -276,7 +283,7 @@ async def test_listed_items_project_exactly_as_get_item(
     as_viewer, as_editor = seen[viewer.id], seen[editor.id]
     assert "Draft" not in as_viewer and "qualityIssues" in as_editor["Draft"]["document"]
     assert "qualityIssues" not in as_viewer["Published"]["document"]
-    assert as_editor["Published child"]["document"]["topics"]
+    assert as_editor["Published child"]["document"]["concepts"]
     assert as_viewer["Restricted"]["access"] == "READER"
     assert as_viewer["Restricted"]["collection"]["documentCount"] == 3
     assert as_editor["Restricted"]["collection"]["documentCount"] == 3

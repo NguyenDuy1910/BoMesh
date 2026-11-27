@@ -5,24 +5,26 @@ import type { QueueFilter } from "./model";
 /**
  * Documents → All's filters as the ListItems AIP-160 document filter (preview `allRows`): the processing-state pills
  * (`document.indexingState`) and the facets — Collection (`ancestors:`), Publication, Origin (`document.origin.source`;
- * uploads and contributions have none), Type (the file class, `itemType`), Topic (hierarchical) — plus search on the name (`displayName` with
+ * uploads and contributions have none), Type (the file class, `itemType`), Concept (`document.concepts:`, hierarchical:
+ * the concept or anything under it) — plus search on the name (`displayName` with
  * AIP-160 wildcards). The same string is the run selector's `filter` when "Select all matching" processes the list.
  * Pure (no React) so the mapping is unit-tested.
  */
 
-/** All's URL state: `?processing= &kb= &pub= &src= &type= &topic= &q=` (bare IDs; `src=upload` or `contrib` = no source; `type=pdf`). */
+/** All's URL state: `?processing= &kb= &pub= &src= &type= &concept= &q=` (bare IDs; `concept={schemeId}/{conceptId}`;
+ *  `src=upload` or `contrib` = no source; `type=pdf`). */
 export interface DocQuery {
   processing: ProcessingKey | "";
   kb: string;
   pub: "published" | "unpublished" | "";
   src: string;
   type: string;
-  topic: string;
+  concept: string;
   q: string;
 }
 
 /** The facets (filter dropdowns); the processing pills and search are apart. */
-export const DOC_FACETS = ["kb", "pub", "src", "type", "topic"] as const;
+export const DOC_FACETS = ["kb", "pub", "src", "type", "concept"] as const;
 export type DocFacet = (typeof DOC_FACETS)[number];
 
 /** Origin values without a source: uploads by editors and members' contributions (the API can't tell them apart). */
@@ -38,7 +40,7 @@ export function docQueryOf(get: (key: string) => string | null): DocQuery {
     pub: pub === "published" || pub === "unpublished" ? pub : "",
     src: get("src") ?? "",
     type: get("type") ?? "",
-    topic: get("topic") ?? "",
+    concept: get("concept") ?? "",
     q: (get("q") ?? "").trim(),
   };
 }
@@ -46,8 +48,21 @@ export function docQueryOf(get: (key: string) => string | null): DocQuery {
 /** AIP-160 string literal (`"` and `\` escaped). */
 export const aipString = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
-/** A full resource name for a bare ID (`kb=…`, `topic=…`, `src=…` carry bare IDs; full names pass through). */
+/** A full resource name for a bare ID (`kb=…`, `src=…` carry bare IDs; full names pass through). */
 const full = (workspace: string, collection: string, id: string) => (id.includes("/") ? id : `workspaces/${workspace}/${collection}/${id}`);
+
+/** A concept's full name from the address (`{schemeId}/{conceptId}`; a full name passes through). */
+export const conceptOfParam = (workspace: string, value: string) => {
+  if (value.startsWith("workspaces/")) return value;
+  const [scheme = "", concept = ""] = value.split("/");
+  return `workspaces/${workspace}/conceptSchemes/${scheme}/concepts/${concept}`;
+};
+
+/** The address value for a concept's full name (`{schemeId}/{conceptId}`). */
+export const conceptParam = (concept: string) => {
+  const parts = concept.split("/");
+  return parts.length >= 6 ? `${parts[3]}/${parts[5]}` : concept;
+};
 
 /**
  * The document filter for `query` over `scope` (the collections the caller looks after: full item names). A
@@ -61,7 +76,7 @@ export function documentFilter(query: DocQuery, { workspace, scope }: { workspac
   if (query.pub) and.push(`document.publicationState = ${query.pub.toUpperCase()}`);
   if (query.src) and.push(NO_SOURCE[query.src] ? "document.origin.source = null" : `document.origin.source = ${aipString(full(workspace, "sources", query.src))}`);
   if (query.type) and.push(`itemType = ${itemTypeOf(docTypeOf(query.type))}`);
-  if (query.topic) and.push(`document.topics:${aipString(full(workspace, "topics", query.topic))}`);
+  if (query.concept) and.push(`document.concepts:${aipString(conceptOfParam(workspace, query.concept))}`);
   if (query.q) and.push(nameSearch(query.q));
   return and.join(" AND ");
 }
@@ -97,7 +112,7 @@ export const SUBMISSIONS_TO_PROCESS = `${OPEN} AND kind = NEW_DOCUMENT AND origi
 export const TO_PROCESS_STATES = ["PENDING", "RUNNING", "FAILED", "OUTDATED"] as const;
 
 /** The scoped knowledge documents (ListItems) with `clauses` ANDed. */
-export const curatedFilter = (scope: readonly string[], ...clauses: string[]) => listFilter([documentFilter({ processing: "", kb: "", pub: "", src: "", type: "", topic: "", q: "" }, { workspace: "", scope }), ...clauses].filter(Boolean).join(" AND "));
+export const curatedFilter = (scope: readonly string[], ...clauses: string[]) => listFilter([documentFilter({ processing: "", kb: "", pub: "", src: "", type: "", concept: "", q: "" }, { workspace: "", scope }), ...clauses].filter(Boolean).join(" AND "));
 
 /** Processing's documents (ListItems): not processed, failed or changed since (`states` narrows it, e.g. a pill). */
 export const documentsToProcess = (scope: readonly string[], states: readonly string[] = TO_PROCESS_STATES) => curatedFilter(scope, anyOf("document.indexingState", states));
@@ -114,12 +129,24 @@ export const REVERIFY_REASON = {
 export const reverifyFilter = (scope: readonly string[], reason?: keyof typeof REVERIFY_REASON) =>
   curatedFilter(scope, PUBLISHED, "document.indexingState != OUTDATED", reason ? REVERIFY_REASON[reason] : `(${REVERIFY_REASON.expired} OR ${REVERIFY_REASON.never})`);
 
-/** The detail a published document lacks (Missing details' Missing filter). */
-export const DETAIL_GAP = { topic: "NOT document.topics:*", owner: "NOT document.owner:*", summary: "NOT document.summary:*" } as const;
+/** The detail a published document lacks (Missing details' Missing filter); `concept` = no accepted concept at all. */
+export const DETAIL_GAP = { concept: "NOT document.concepts:*", owner: "NOT document.owner:*", summary: "NOT document.summary:*" } as const;
+export type DetailGap = keyof typeof DETAIL_GAP;
 
-/** Missing details (ListItems): published without a topic, an owner or a summary (`gap` narrows it to one). */
-export const detailsFilter = (scope: readonly string[], gap?: keyof typeof DETAIL_GAP) =>
-  curatedFilter(scope, PUBLISHED, gap ? DETAIL_GAP[gap] : `(${DETAIL_GAP.topic} OR ${DETAIL_GAP.owner} OR ${DETAIL_GAP.summary})`);
+/**
+ * Missing a classification (preview `metadataGaps`): no accepted concept at all, or none in a classification scheme that
+ * requires a label (`required` = those schemes' names; a scheme name filters on any of its concepts).
+ */
+export function conceptGap(required: readonly string[] = []): string {
+  const schemes = required.map((s) => `NOT document.concepts:${aipString(s)}`);
+  return schemes.length ? `(${[DETAIL_GAP.concept, ...schemes].join(" OR ")})` : DETAIL_GAP.concept;
+}
+
+/** Missing details (ListItems): published without a classification, an owner or a summary (`gap` narrows it to one). */
+export const detailsFilter = (scope: readonly string[], gap?: DetailGap, required: readonly string[] = []) => {
+  const concept = conceptGap(required);
+  return curatedFilter(scope, PUBLISHED, gap === "concept" ? concept : gap ? DETAIL_GAP[gap] : `(${concept} OR ${DETAIL_GAP.owner} OR ${DETAIL_GAP.summary})`);
+};
 
 /** Published documents in scope (ListItems), or only the verified ones (Knowledge health's share). */
 export const publishedFilter = (scope: readonly string[], { verified = false }: { verified?: boolean } = {}) => curatedFilter(scope, PUBLISHED, verified ? "document.verification.state = VERIFIED" : "");
@@ -133,17 +160,29 @@ export function nameSearch(q: string): string {
   return term ? `displayName = ${aipString(`*${term}*`)}` : "";
 }
 
-/** Topics → Suggestions → Without a topic (ListItems): processed documents in scope the assistant gave no topic. */
-export const withoutTopicFilter = (scope: readonly string[]) => curatedFilter(scope, "document.indexingState = SUCCEEDED", DETAIL_GAP.topic);
+/* ═══════════════ Classification › Gợi ý ═══════════════ */
+
+const anyConcept = (field: string, concepts: readonly string[]) => concepts.map((c) => `${field}:${aipString(c)}`).join(" OR ");
 
 /**
- * Documents in scope carrying `topic` as the assistant applied it, unconfirmed (a card's sample; what Confirm topic
- * confirms), or carrying any such topic (the `document.assistantTopics` facet that counts Topics to confirm).
+ * Published documents in scope with a label awaiting review (`document.suggestedConcepts`, hierarchical): any (the facet
+ * that groups them by concept), or `concept`'s, without the documents of the narrower concepts in `except` (they have
+ * their own card). What a card lists and what its Accept all / Reject all act on.
  */
-export const assistantTaggedFilter = (scope: readonly string[], topic?: string) => curatedFilter(scope, `document.assistantTopics:${topic ? aipString(topic) : "*"}`);
+export function suggestedFilter(scope: readonly string[], concept?: string, except: readonly string[] = []): string {
+  return curatedFilter(
+    scope,
+    PUBLISHED,
+    concept ? `document.suggestedConcepts:${aipString(concept)}` : "document.suggestedConcepts:*",
+    except.length ? `NOT (${anyConcept("document.suggestedConcepts", except)})` : "",
+  );
+}
 
-/** A topic's published documents in one collection (a topic's Distribution: one count per collection in scope). */
-export const publishedWithTopic = (collection: string, topic: string) => curatedFilter([collection], PUBLISHED, `document.topics:${aipString(topic)}`);
+/**
+ * A scheme's Not classified pool: published documents in scope the classifier left uncertain in it
+ * (`document.uncertainSchemes`).
+ */
+export const unclassifiedFilter = (scope: readonly string[], scheme: string) => curatedFilter(scope, PUBLISHED, `document.uncertainSchemes:${aipString(scheme)}`);
 
 /* ═══════════════ Review and Processing: their filters as server clauses ═══════════════ */
 

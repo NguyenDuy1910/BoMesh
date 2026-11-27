@@ -1,12 +1,13 @@
 "use client";
 
-import { Autocomplete, Button, Checkbox, FieldError, Header, ListBox, Popover, SearchField, Spinner, TextArea, TextField } from "@heroui/react";
+import { Button, FieldError, Spinner, TextArea, TextField } from "@heroui/react";
 import {
   ArrowLeft,
   Check,
   ChevronDown,
   ChevronUp,
   CircleAlert,
+  Clock,
   Copy,
   ExternalLink,
   Eye,
@@ -14,29 +15,28 @@ import {
   Globe,
   History,
   Pencil,
-  Plus,
   Shield,
   Sparkles,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import NextLink from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { EmptyState, FileIcon, IconButton, LinkButton as TextLink } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { errorMessage, resourceId } from "@/lib/api/client";
 import { plural, relInline } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { downloadItem, type Topic } from "@/modules/knowledge/api";
+import { conceptIcon } from "@/modules/home/domainIcon";
+import { downloadItem } from "@/modules/knowledge/api";
+import { ConceptPicker } from "@/modules/knowledge/components/ConceptPicker";
 import { LifecycleChip } from "@/modules/knowledge/components/LifecycleChip";
-import { topicToneProps } from "@/modules/knowledge/components/TopicTag";
-import { fold, topicLooks, topicTree, type TopicLook } from "@/modules/knowledge/model";
 import { useItem } from "@/modules/knowledge/queries";
 import { DocumentSurface } from "@/modules/knowledge/reader/components/DocumentSurface";
+import { classSchemes, conceptLabel, docAssignments, schemeByName, schemeIconName, schemeLabel, schemeOfConcept, type Taxonomy } from "@/modules/knowledge/taxonomy";
 
-import { cleanName, lastEvent, topicsHref, versionOf, type Flag } from "../../model";
+import { cleanName, lastEvent, taxonomyHref, versionOf, type Flag } from "../../model";
 import { noteLines, type NoteLink } from "../../noteLinks";
 import { useCollectionAudience } from "../../queries";
 import { FieldTag, PlainSelect, SourceName } from "../parts";
@@ -94,11 +94,12 @@ export interface InspectorProps {
   selecting: boolean;
   draft: Draft | null;
   setDraft: (patch: Partial<Draft>) => void;
-  topics: readonly Topic[];
+  taxonomy: Taxonomy;
   bases: readonly { name: string; displayName: string }[];
   baseNames: ReadonlyMap<string, string>;
   memberNames: ReadonlyMap<string, string>;
-  canManageTopics: boolean;
+  /** Classification › Suggestions is open to the caller (where corrections become label proposals). */
+  canManageTaxonomy: boolean;
   onStep: (dir: 1 | -1) => void;
   onBack: () => void;
   onApprove: () => void;
@@ -289,8 +290,8 @@ function Field({ label, tag, children, help }: { label: string; tag?: ReactNode;
 
 const byContributor = <span className="cur-tag cur-tag--plain">Do người gửi chọn</span>;
 
-/** Document name → Collection (who will see it) → Topics → Summary, under one quiet line saying the assistant filled
- *  them in (preview `suggestionsCard`). */
+/** Document name → Collection (who will see it) → Classification → Summary, under one quiet line saying the assistant
+ *  filled them in (preview `suggestionsCard`). */
 function Classification(p: InspectorProps) {
   const { view: v, draft, setDraft } = p;
   const c = v.sub.contribution;
@@ -298,7 +299,6 @@ function Classification(p: InspectorProps) {
   const version = c.kind === "NEW_REVISION";
   const audience = useCollectionAudience(draft?.kb || v.base);
   const processed = !version && v.sub.item?.document?.indexingState === "SUCCEEDED";
-  const looks = useMemo(() => topicLooks(p.topics), [p.topics]);
   const section = (body: ReactNode) => (
     <section className="cur-insp__sec cur-sugs" aria-label="Phân loại">
       {processed && draft ? (
@@ -314,7 +314,7 @@ function Classification(p: InspectorProps) {
     return section(
       <div className="cur-analyzing">
         <Spinner size="sm" />
-        <span>Đang đọc tệp và đối chiếu với các chủ đề của bạn…</span>
+        <span>Đang đọc tệp và đối chiếu với bộ phân loại của bạn…</span>
       </div>,
     );
   }
@@ -363,63 +363,40 @@ function Classification(p: InspectorProps) {
       </div>
     ) : null;
 
-  // Topics: suggestions toggle on/off; reviewers may add any existing topic.
-  const topicName = new Map(p.topics.map((t) => [t.name ?? "", t.displayName ?? ""]));
-  const sugg = s.topics ?? [];
-  const extra = draft.topics.filter((t) => !sugg.includes(t));
-  const toggle = (t: string) => setDraft({ topics: draft.topics.includes(t) ? draft.topics.filter((x) => x !== t) : [...draft.topics, t] });
-  const addGroups = topicTree(p.topics)
-    .map((dm) => ({
-      name: dm.name ?? "",
-      displayName: dm.displayName ?? "",
-      topics: dm.children.filter((t) => !draft.topics.includes(t.name ?? "")).map((t) => ({ name: t.name ?? "", displayName: t.displayName ?? "" })),
-    }))
-    .filter((g) => g.topics.length);
-  // A changed topic teaches classification: approval records it as a correction; a workspace admin turns corrections into keywords.
-  const changed = draft.topics.length !== sugg.length || draft.topics.some((t) => !sugg.includes(t));
-  const teach = changed ? (
-    <div className="cur-teach">
-      <Checkbox isSelected={draft.teach} onChange={(teach) => setDraft({ teach })}>
-        <Checkbox.Content>
-          <Checkbox.Control>
-            <Checkbox.Indicator />
-          </Checkbox.Control>
-          <span className="checkbox__label">Dùng thay đổi của tôi để cải thiện phân loại</span>
-        </Checkbox.Content>
-      </Checkbox>
-      <span className="cur-teach__hint">{p.canManageTopics ? "Bạn sẽ thấy ở Chủ đề → Gợi ý." : "Quản trị viên không gian làm việc sẽ thấy ở Chủ đề → Gợi ý."}</span>
-    </div>
+  // Classification: one row per classification scheme, in tab order — the assistant's concepts as removable chips
+  // (suggested ones marked Chờ duyệt), each with its confidence and evidence. Reviewers add any published concept of the
+  // scheme; a scheme that takes at most n concepts drops its oldest to make room.
+  const t = p.taxonomy;
+  const byName = new Map(docAssignments(t, v.sub.item?.document?.concepts).map((a) => [a.concept ?? "", a]));
+  const changed = draft.concepts.length !== draft.classified.length || draft.concepts.some((x) => !draft.classified.includes(x));
+  const schemes = classSchemes(t);
+  const setScheme = (scheme: string, next: string[]) => {
+    const max = schemeByName(t, scheme)?.cardinality?.max;
+    const kept = max && next.length > max ? next.slice(next.length - max) : next;
+    setDraft({ concepts: [...draft.concepts.filter((x) => schemeOfConcept(x) !== scheme), ...kept] });
+  };
+  // A changed classification is learned from (a correction; repeated ones become label proposals a workspace admin
+  // decides in Phân loại › Gợi ý). Unchanged, what's awaiting review is published as it is.
+  const decideIn = p.canManageTaxonomy ? (
+    <>
+      {" "}
+      <NextLink className="link" href={taxonomyHref("suggestions")}>
+        Quyết định ở Phân loại → Gợi ý
+      </NextLink>
+    </>
   ) : null;
-  // Proposed new topics are decided in one place, Knowledge Studio → Topics → Suggestions; publishing never waits for them.
-  const proposed = (s.proposedTopics ?? [])
-    .map((ref) => p.topics.find((t) => t.state === "PROPOSED" && (t.name === ref || t.displayName === ref))?.displayName ?? (p.topics.some((t) => t.name === ref) ? "" : ref))
-    .filter(Boolean);
-  const proposedNote = proposed.length ? (
-    <div className="cur-prop-note">
-      <Sparkles className="i i-xs" aria-hidden />
-      <div>
-        <span>{proposed.length === 1 ? "Đề xuất chủ đề mới:" : "Đề xuất các chủ đề mới:"}</span>{" "}
-        {proposed.map((name, i) => (
-          <span key={name}>
-            {i ? ", " : ""}
-            <span className="medium" translate="no">
-              {name}
-            </span>
-          </span>
-        ))}
-        <br />
-        <span>Bạn có thể công bố mà không cần chủ đề này.</span>{" "}
-        {p.canManageTopics ? (
-          <NextLink className="link" href={topicsHref("suggestions")}>
-            Quyết định ở Chủ đề → Gợi ý
-          </NextLink>
-        ) : (
-          <span>Quản trị viên không gian làm việc sẽ quyết định.</span>
-        )}
-      </div>
-    </div>
-  ) : null;
-  const topicsTag = changed ? <FieldTag edited /> : <FieldTag value={sugg.length ? s.topicsConfidence : null} suggested={sugg.length > 0} />;
+  const waiting = !changed && draft.classified.some((x) => byName.get(x)?.state === "SUGGESTED");
+  const classNote =
+    changed || waiting ? (
+      <p className="cur-concept-note">
+        {changed ? <Sparkles className="i i-xs" aria-hidden /> : <Clock className="i i-xs" aria-hidden />}
+        <span>
+          <span>{changed ? "Thay đổi của bạn được dùng để cải thiện phân loại." : "Các khái niệm chờ duyệt được công bố dưới dạng gợi ý."}</span>
+          {decideIn}
+        </span>
+      </p>
+    ) : null;
+  const classTag = changed ? <FieldTag edited /> : <FieldTag suggested={draft.classified.length > 0} />;
 
   const summaryEdited = draft.summary.trim() !== (s.summary ?? "").trim() && !!(s.summary || draft.summary.trim());
 
@@ -445,27 +422,59 @@ function Classification(p: InspectorProps) {
           <PlainSelect label="Kho tài liệu" value={draft.kb} options={baseOpts} placeholder="Chọn kho tài liệu" onChange={(kb) => setDraft({ kb })} />
         )}
       </Field>
-      <Field
-        label="Chủ đề"
-        tag={topicsTag}
-        help={
-          teach || proposedNote ? (
-            <>
-              {teach}
-              {proposedNote}
-            </>
-          ) : null
-        }
-      >
-        <div className="cur-topics" role="group" aria-label="Chủ đề">
-          {sugg.map((t) => (
-            <TopicChip key={t} on={draft.topics.includes(t)} name={topicName.get(t) ?? "Chủ đề"} look={looks.get(t)} onPress={() => toggle(t)} />
-          ))}
-          {extra.map((t) => (
-            <TopicChip key={t} on name={topicName.get(t) ?? "Chủ đề"} look={looks.get(t)} onPress={() => toggle(t)} />
-          ))}
-          {!sugg.length && !extra.length ? <span className="t-sm muted">Chưa gợi ý chủ đề</span> : null}
-          {addGroups.length ? <AddTopic groups={addGroups} onAdd={(t) => !draft.topics.includes(t) && setDraft({ topics: [...draft.topics, t] })} /> : null}
+      <Field label="Phân loại" tag={classTag} help={classNote}>
+        <div className="cur-schemes" role="group" aria-label="Phân loại">
+          {schemes.length ? (
+            schemes.map((scheme) => {
+              const name = scheme.name ?? "";
+              const ids = draft.concepts.filter((x) => schemeOfConcept(x) === name);
+              const SchemeIcon = conceptIcon(schemeIconName(name));
+              const why = ids.flatMap((id) => {
+                const a = byName.get(id);
+                return a ? [a] : [];
+              });
+              return (
+                <div key={name} className="cur-scheme">
+                  <div className="cur-scheme__head">
+                    <SchemeIcon className="i i-xs" aria-hidden />
+                    <span className="cur-scheme__name" translate="no">
+                      {schemeLabel(scheme)}
+                    </span>
+                  </div>
+                  <ConceptPicker
+                    value={ids}
+                    onChange={(next) => setScheme(name, next)}
+                    taxonomy={t}
+                    scheme={name}
+                    label={schemeLabel(scheme)}
+                    suggested={ids.filter((id) => byName.get(id)?.state === "SUGGESTED")}
+                  />
+                  {why.length ? (
+                    <ul className="cur-why" aria-label="Vì sao chọn các khái niệm này">
+                      {why.map((a) => (
+                        <li key={a.concept}>
+                          <span className="medium" translate="no">
+                            {conceptLabel(t, a.concept)}
+                          </span>
+                          {a.confidence != null && a.source !== "HUMAN" ? <span className="muted num">{` · ${Math.round(a.confidence * 100)}%`}</span> : null}
+                          {a.evidence?.quote ? (
+                            <>
+                              <span className="muted" aria-hidden>
+                                {" — "}
+                              </span>
+                              <span className="muted" translate="no">{`“${a.evidence.quote}”`}</span>
+                            </>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <span className="t-sm muted">Chưa có khái niệm</span>
+          )}
         </div>
       </Field>
       <Field label="Tóm tắt" tag={<FieldTag value={s.summary ? s.summaryConfidence : null} suggested={!!s.summary} edited={summaryEdited} />}>
@@ -474,86 +483,6 @@ function Classification(p: InspectorProps) {
         </TextField>
       </Field>
     </div>,
-  );
-}
-
-/** A suggested or added topic (preview `tchip`): chosen, a neutral chip with the topic's icon in its domain's color
- *  and × to decline it; declined, dashed and muted with + to take it back. */
-function TopicChip({ on, name, look, onPress }: { on: boolean; name: string; look?: TopicLook; onPress: () => void }) {
-  const { style, Icon } = topicToneProps(look);
-  return (
-    <button type="button" className="cur-topic" aria-pressed={on} style={style} onClick={onPress} title={name}>
-      {on ? <Icon className="i i-xs cur-topic__icon" aria-hidden /> : <Plus className="i i-xs" aria-hidden />}
-      <span className="cur-topic__name" translate="no">
-        {name}
-      </span>
-      {on ? <X className="i i-xs cur-topic__x" aria-hidden /> : null}
-    </button>
-  );
-}
-
-interface TopicGroup {
-  name: string;
-  displayName: string;
-  topics: { name: string; displayName: string }[];
-}
-
-/** Add topic: a small ghost button at the end of the chips opening a searchable list of the topics not chosen yet,
- *  under their domains. Typing matches a topic or its domain (case and diacritics ignored); Enter or a click adds the
- *  topic and closes the list. */
-function AddTopic({ groups, onAdd }: { groups: readonly TopicGroup[]; onAdd: (topic: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const fq = fold(q.trim());
-  const shown = fq
-    ? groups.map((g) => (fold(g.displayName).includes(fq) ? g : { ...g, topics: g.topics.filter((t) => fold(t.displayName).includes(fq)) })).filter((g) => g.topics.length)
-    : groups;
-  const onOpenChange = (next: boolean) => {
-    setOpen(next);
-    if (!next) setQ("");
-  };
-  return (
-    <Popover isOpen={open} onOpenChange={onOpenChange}>
-      <Button variant="ghost" size="sm" className="cur-add-topic">
-        <Plus className="i" aria-hidden />
-        Thêm chủ đề
-      </Button>
-      <Popover.Content placement="bottom start" className="cur-topic-pick">
-        <Popover.Dialog aria-label="Thêm chủ đề" className="cur-topic-pick__dialog">
-          <Autocomplete.Filter inputValue={q} onInputChange={setQ}>
-            <SearchField aria-label="Tìm chủ đề" autoFocus fullWidth className="search-input search-input--sm search-input--full">
-              <SearchField.Group>
-                <SearchField.SearchIcon />
-                <SearchField.Input placeholder="Tìm chủ đề" autoComplete="off" />
-                <SearchField.ClearButton aria-label="Xóa tìm kiếm" />
-              </SearchField.Group>
-            </SearchField>
-            <ListBox
-              aria-label="Chủ đề"
-              className="cur-topic-pick__list"
-              onAction={(key) => {
-                onAdd(String(key));
-                onOpenChange(false);
-              }}
-              renderEmptyState={() => <div className="cur-topic-pick__none">Không có kết quả</div>}
-            >
-              {shown.map((g) => (
-                <ListBox.Section key={g.name} id={g.name}>
-                  <Header translate="no">{g.displayName}</Header>
-                  {g.topics.map((t) => (
-                    <ListBox.Item key={t.name} id={t.name} textValue={t.displayName}>
-                      <span className="truncate" translate="no">
-                        {t.displayName}
-                      </span>
-                    </ListBox.Item>
-                  ))}
-                </ListBox.Section>
-              ))}
-            </ListBox>
-          </Autocomplete.Filter>
-        </Popover.Dialog>
-      </Popover.Content>
-    </Popover>
   );
 }
 

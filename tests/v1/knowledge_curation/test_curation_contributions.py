@@ -13,11 +13,13 @@ from bomesh.db.models import (
     IngestionRun,
     IngestionRunItem,
     ItemRevision,
-    ItemTopic,
+    ItemConcept,
     Notification,
 )
 from bomesh.services.knowledge_items.item_store import ItemService
+from bomesh.services.taxonomy.names import concept_name
 from curation_support import Scene, error_reason, item_name
+from taxonomy_support import C, publish_scheme
 
 pytestmark = pytest.mark.asyncio
 
@@ -56,10 +58,7 @@ async def test_create_analyzes_into_review_and_notifies_reviewers(scene: Scene) 
     assert recipients == 1
 
 
-async def test_create_flags_duplicates_formats_personal_data_and_suggests_topics(
-    scene: Scene,
-) -> None:
-    await scene.topic("pricing", "Pricing")
+async def test_create_flags_duplicates_formats_and_personal_data(scene: Scene) -> None:
     published = await scene.world.make_document(scene.kb, item_name="Pricing policy jane@example.com")
     await scene.set_content(published, size=100)
     same = await scene.candidate(item_name="Pricing policy jane@example.com", size=100)
@@ -70,7 +69,13 @@ async def test_create_flags_duplicates_formats_personal_data_and_suggests_topics
 
     assert {f["kind"] for f in duplicate["flags"]} == {"DUPLICATE", "PERSONAL_DATA"}
     assert {f.get("relatedItem") for f in duplicate["flags"]} == {item_name(published), None}
-    assert duplicate["suggestions"]["topics"] == [f"workspaces/{scene.ws.id}/topics/pricing"]
+    assert set(duplicate["suggestions"]) <= {
+        "collection",
+        "collectionConfidence",
+        "summary",
+        "summaryConfidence",
+        "title",
+    }
     assert [f["kind"] for f in unsupported["flags"]] == ["UNSEARCHABLE_FORMAT"]
 
 
@@ -349,7 +354,14 @@ async def test_a_closed_contribution_hides_the_candidates_title_from_its_reviewe
 
 
 async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> None:
-    await scene.topic("hr", "HR")
+    domain = await publish_scheme(
+        scene.sessions,
+        scene.ws.id,
+        scene.admin.id,
+        "domain",
+        [C("hr", "Nhân sự"), C("it", "Công nghệ thông tin")],
+        has_primary=True,
+    )
     candidate = await scene.candidate()
     body = await scene.submit(candidate)
     reviewer = await scene.as_(scene.reviewer)
@@ -374,7 +386,10 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
         _url(scene, body, ":approve"),
         json={
             "etag": body["etag"],
-            "topics": [f"workspaces/{scene.ws.id}/topics/hr"],
+            "concepts": [
+                concept_name(scene.ws.id, "domain", "it"),
+                concept_name(scene.ws.id, "domain", "hr"),
+            ],
             "summary": "The handbook",
             "title": " Employee handbook 2026 ",
         },
@@ -390,7 +405,17 @@ async def test_approve_moves_publishes_tags_and_never_ingests(scene: Scene) -> N
         "Employee handbook 2026",
     )
     assert item.file_name == file_name
-    assert await _count(scene, select(func.count()).where(ItemTopic.item_id == candidate.id)) == 1
+    async with scene.sessions() as session:
+        rows = (
+            await session.execute(
+                select(ItemConcept.concept_id, ItemConcept.is_primary).where(
+                    ItemConcept.item_id == candidate.id,
+                    ItemConcept.state == "accepted",
+                    ItemConcept.source == "human",
+                )
+            )
+        ).all()
+    assert set(rows) == {(domain["it"], True), (domain["hr"], False)}
     assert await _count(scene, select(func.count()).select_from(IngestionRun)) == 0
     notified = await _count(
         scene,

@@ -83,6 +83,20 @@ class Evidence:
     relevance_score: float | None = None
     rerank_score: float | None = None
     document: DocumentFacts | None = None
+    #: The chunks around this match in document order (same revision, same
+    #: heading or sheet), each its own citable evidence; empty unless the search
+    #: asked for context. ``content`` stays the match alone.
+    context_before: tuple[Evidence, ...] = ()
+    context_after: tuple[Evidence, ...] = ()
+    #: The reading of an ambiguous query this match answers (an option's display
+    #: name, e.g. ``Loại tài liệu: Đồ án – khóa luận``); None for the single reading.
+    group: str | None = None
+
+    @property
+    def passage(self) -> str:
+        """The match with its context, in document order."""
+
+        return "\n".join(part.content for part in (*self.context_before, self, *self.context_after))
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +105,67 @@ class EvidenceContext:
 
     text: str
     evidence: tuple[Evidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class QueryInterpretation:
+    """How one query was read against the published taxonomy (``conversation_loop.md`` "Knowledge retrieval").
+
+    ``concepts`` are the resolved readings (``"khóa luận" → Nghiệp vụ: …``); an
+    ambiguous span's ``options`` are the groups its evidence is labeled with."""
+
+    query: str
+    concepts: tuple[str, ...] = ()
+    ambiguity: str | None = None
+    options: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Retrieval:
+    """A search's evidence and how its queries were read."""
+
+    evidence: list[Evidence]
+    interpretations: tuple[QueryInterpretation, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Recall:
+    """A recall pass: ``query`` searched only over ``item_ids`` (documents a reading's
+    concepts match, already within the caller's visibility)."""
+
+    key: str
+    query: str
+    item_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RankedList:
+    """Candidates in final order; ``group`` names the ambiguity option they answer."""
+
+    chunks: list[ContextualChunk]
+    group: str | None = None
+
+
+class RankingPlan(Protocol):
+    """One search's taxonomy-aware ranking (built per search by :class:`SearchRanking`)."""
+
+    interpretations: tuple[QueryInterpretation, ...]
+    recalls: tuple[Recall, ...]
+
+    async def order(
+        self, base: Sequence[ContextualChunk], recalled: Mapping[str, Sequence[ContextualChunk]]
+    ) -> list[RankedList]:
+        """The main ranking (``group`` None) or, for an ambiguous query, one list per
+        option; boosted, and without documents the searcher's applicability excludes."""
+        ...
+
+
+class SearchRanking(Protocol):
+    """Plans the interpretation, recall passes and boosts of one retrieval."""
+
+    async def plan(
+        self, ctx: RetrievalContext, queries: Sequence[str], scope: ReadScope
+    ) -> RankingPlan | None: ...
 
 
 @runtime_checkable
@@ -107,7 +182,25 @@ class KnowledgeRetriever(Protocol):
         *,
         limit: int,
         ctx: RetrievalContext,
-    ) -> list[Evidence]: ...
+        context_chunks: int = 0,
+    ) -> list[Evidence]:
+        """``limit`` matches, strongest first; with ``context_chunks``, each brings that
+        many neighbours on each side (:attr:`Evidence.context_before` / ``context_after``)."""
+
+    async def search_interpreted(
+        self,
+        queries: Sequence[str],
+        *,
+        limit: int,
+        ctx: RetrievalContext,
+        context_chunks: int = 0,
+    ) -> Retrieval:
+        """:meth:`search` with how the queries were read; evidence of an ambiguous query
+        is grouped per reading (:attr:`Evidence.group`). Without a taxonomy-aware
+        ranking this is the plain search."""
+        return Retrieval(
+            evidence=await self.search(queries, limit=limit, ctx=ctx, context_chunks=context_chunks)
+        )
 
 
 class Reranker(Protocol):
@@ -148,9 +241,15 @@ __all__ = [
     "ItemKnowledgeRetriever",
     "ItemReadAccess",
     "KnowledgeRetriever",
+    "QueryInterpretation",
+    "RankedList",
+    "RankingPlan",
     "ReadAccess",
     "ReadScope",
+    "Recall",
     "Reranker",
+    "Retrieval",
     "RetrievalContext",
+    "SearchRanking",
     "SemanticReranker",
 ]

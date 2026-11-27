@@ -168,7 +168,7 @@ db-init: services ## Apply the current database design and the IAM catalog (perm
 db-reset: db-init seed ## Rebuild PostgreSQL from the current ORM and reseed the workspaces (Qdrant and storage untouched).
 	@echo "PostgreSQL reset is complete."
 
-seed: services ## Seed both workspaces, the role-matrix accounts (password 19102003) and HCM-UTE's topics and folders.
+seed: services ## Seed both workspaces, the role-matrix accounts (password 19102003), the university taxonomy and HCM-UTE's folders.
 	@set -euo pipefail
 	@cd backend && DATABASE_URL="$(LOCAL_DATABASE_URL)" uv run python script/seed.py
 
@@ -191,6 +191,7 @@ qdrant-init: services ## Rebuild the derived contextual-hybrid Qdrant collection
 		'{"field_name":"collection_item_id","field_schema":"keyword"}' \
 		'{"field_name":"item_id","field_schema":"keyword"}' \
 		'{"field_name":"chunk_id","field_schema":"keyword"}' \
+		'{"field_name":"chunk_index","field_schema":"integer"}' \
 		'{"field_name":"published","field_schema":"bool"}' \
 		'{"field_name":"is_deleted","field_schema":"bool"}' \
 		'{"field_name":"schema_version","field_schema":"integer"}'; do \

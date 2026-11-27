@@ -8,11 +8,14 @@ import { FileIcon, IconButton, toast, type DataTableSort, type RowAction } from 
 import { errorMessage } from "@/lib/api/client";
 import { plural } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
-import { updateItem } from "@/modules/knowledge/api";
-import { topicTree, type Resource } from "@/modules/knowledge/model";
+import { updateItem, type DocumentConcept } from "@/modules/knowledge/api";
+import { conceptToneProps } from "@/modules/knowledge/components/ConceptTag";
+import type { Resource } from "@/modules/knowledge/model";
+import { useTaxonomy } from "@/modules/knowledge/queries";
+import { assignableConcepts, classSchemes, conceptLabel, conceptPathText, schemeByName, schemeLabel, schemeOfConcept } from "@/modules/knowledge/taxonomy";
 
-import { useAllTopics, useInvalidateCuration } from "../queries";
-import { toCsv } from "../topicSheet";
+import { toCsv } from "../conceptSheet";
+import { useInvalidateCuration } from "../queries";
 
 /** Saves rows as a CSV file in the browser. */
 export function saveCsv(fileName: string, rows: readonly (readonly string[])[]) {
@@ -98,27 +101,43 @@ export function DocCell({ r, sub, size = "md", className = "row gap-12" }: { r: 
   );
 }
 
-/** Adds a topic to documents (keeps their other topics). Undo restores each document's previous topics. */
-export function useApplyTopic() {
+/** A document's accepted whole-document concepts as UpdateItem entries (primary kept). */
+const acceptedEntries = (r: Resource): DocumentConcept[] =>
+  r.assignments.filter((a) => a.state !== "SUGGESTED" && a.concept && !a.section).map((a) => ({ concept: a.concept, primary: !!a.primary }));
+
+/**
+ * Files documents under a concept, in its scheme (preview `applyConcept`): a scheme that takes at most n concepts drops
+ * its oldest to make room, the others keep theirs. UpdateItem `document.concepts` sets the whole-document set, so every
+ * accepted concept of the other schemes goes along. Undo restores each document's accepted concepts.
+ */
+export function useApplyConcept() {
   const { id: ws } = useWorkspace();
   const invalidate = useInvalidateCuration();
-  const topics = useAllTopics();
-  return async (docs: readonly Resource[], topic: string, onDone?: () => void) => {
-    const label = topics.data?.find((t) => t.name === topic)?.displayName ?? "chủ đề";
-    const targets = docs.filter((r) => r.editable && !r.topics.includes(topic));
+  const { data: taxonomy } = useTaxonomy();
+  return async (docs: readonly Resource[], concept: string, onDone?: () => void) => {
+    const label = conceptLabel(taxonomy, concept);
+    const scheme = schemeOfConcept(concept);
+    const max = schemeByName(taxonomy, scheme)?.cardinality?.max;
+    const targets = docs.filter((r) => r.editable && !r.concepts.includes(concept));
     if (!targets.length) {
-      toast(`Đã gắn thẻ “${label}”`, { tone: "accent" });
+      toast(`Đã được xếp vào “${label}”`, { tone: "accent" });
       return;
     }
-    const setTopics = (r: Resource, next: string[]) =>
-      updateItem(ws, r.name, { document: { purpose: r.item.document?.purpose ?? "KNOWLEDGE", topics: next } }, ["document.topics"]);
+    const next = (r: Resource): DocumentConcept[] => {
+      const entries = acceptedEntries(r);
+      const mine = entries.filter((e) => schemeOfConcept(e.concept ?? "") === scheme);
+      const keep = max ? mine.slice(Math.max(0, mine.length - max + 1)) : mine;
+      return [...entries.filter((e) => schemeOfConcept(e.concept ?? "") !== scheme), ...keep, { concept, primary: false }];
+    };
+    const setConcepts = (r: Resource, concepts: DocumentConcept[]) =>
+      updateItem(ws, r.name, { document: { purpose: r.item.document?.purpose ?? "KNOWLEDGE", concepts } }, ["document.concepts"]);
     try {
-      await Promise.all(targets.map((r) => setTopics(r, [...r.topics, topic])));
+      await Promise.all(targets.map((r) => setConcepts(r, next(r))));
       invalidate();
       onDone?.();
-      toast(targets.length === 1 ? `Đã thêm “${label}” vào ${targets[0].title}` : `Đã thêm “${label}” vào ${plural(targets.length, "document")}`, {
+      toast(targets.length === 1 ? `Đã xếp “${targets[0].title}” vào “${label}”` : `Đã xếp ${plural(targets.length, "document")} vào “${label}”`, {
         undo: () =>
-          void Promise.all(targets.map((r) => setTopics(r, r.topics))).then(invalidate, (error: unknown) => {
+          void Promise.all(targets.map((r) => setConcepts(r, acceptedEntries(r)))).then(invalidate, (error: unknown) => {
             invalidate();
             toast(errorMessage(error), { tone: "danger" });
           }),
@@ -130,10 +149,30 @@ export function useApplyTopic() {
   };
 }
 
-/** "Add topic" / "Apply topic" menu: active topics grouped by domain (preview `MENUS['kh-topic']`). */
-export function TopicMenu({ label, onPick, variant = "tertiary", chevron = false }: { label: string; onPick: (topic: string) => void; variant?: "tertiary" | "ghost"; chevron?: boolean }) {
-  const topics = useAllTopics();
-  const tree = useMemo(() => topicTree(topics.data ?? []).filter((d) => d.children.length), [topics.data]);
+/** "Thêm khái niệm" menu (preview `MENUS['kh-concept']`): the assignable concepts of each scheme `docs` miss, by scheme. */
+export function ConceptMenu({
+  label,
+  docs,
+  onPick,
+  variant = "tertiary",
+  chevron = false,
+}: {
+  label: string;
+  docs: readonly Resource[];
+  onPick: (concept: string) => void;
+  variant?: "tertiary" | "ghost" | "secondary";
+  chevron?: boolean;
+}) {
+  const { data: taxonomy } = useTaxonomy();
+  // The schemes none of `docs` has an accepted concept in (each one's missing classification), with what they offer.
+  const groups = useMemo(
+    () =>
+      classSchemes(taxonomy)
+        .filter((s) => docs.some((r) => !acceptedEntries(r).some((e) => schemeOfConcept(e.concept ?? "") === s.name)))
+        .map((s) => ({ scheme: s, concepts: assignableConcepts(taxonomy, s.name ?? "") }))
+        .filter((g) => g.concepts.length),
+    [docs, taxonomy],
+  );
   return (
     <Dropdown>
       <Button size="sm" variant={variant}>
@@ -142,24 +181,29 @@ export function TopicMenu({ label, onPick, variant = "tertiary", chevron = false
         {chevron ? <ChevronDown className="i" aria-hidden /> : null}
       </Button>
       <Dropdown.Popover placement="bottom end">
-        {tree.length ? (
+        {groups.length ? (
           <Dropdown.Menu aria-label={label} onAction={(key) => onPick(String(key))}>
-            {tree.map((d) => (
-              <Dropdown.Section key={d.name}>
-                <Header translate="no">{d.displayName}</Header>
-                {d.children.map((t) => (
-                  <Dropdown.Item key={t.name} id={t.name ?? ""} textValue={t.displayName}>
-                    <Tag className="i" aria-hidden />
-                    <Label translate="no">{t.displayName}</Label>
-                  </Dropdown.Item>
-                ))}
+            {groups.map((g) => (
+              <Dropdown.Section key={g.scheme.name}>
+                <Header translate="no">{schemeLabel(g.scheme)}</Header>
+                {g.concepts.map((c) => {
+                  const name = c.name ?? "";
+                  const { Icon } = conceptToneProps(taxonomy, name);
+                  const path = conceptPathText(taxonomy, name);
+                  return (
+                    <Dropdown.Item key={name} id={name} textValue={path}>
+                      <Icon className="i" aria-hidden />
+                      <Label translate="no">{path}</Label>
+                    </Dropdown.Item>
+                  );
+                })}
               </Dropdown.Section>
             ))}
           </Dropdown.Menu>
         ) : (
           <Dropdown.Menu aria-label={label} disabledKeys={["none"]}>
-            <Dropdown.Item id="none" textValue="Chưa có chủ đề">
-              <Label>Chưa có chủ đề</Label>
+            <Dropdown.Item id="none" textValue="Chưa có khái niệm">
+              <Label>Chưa có khái niệm</Label>
             </Dropdown.Item>
           </Dropdown.Menu>
         )}

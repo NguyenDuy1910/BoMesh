@@ -115,7 +115,7 @@ async function readRunPage(ws: string, ids: readonly string[]): Promise<Entry[]>
  * Documents → Processing (preview `processingView`): what isn't processed yet — new documents' submissions first (the
  * assistant classifies them for their reviewer; once processed they move to Review), then documents nobody processed,
  * that failed or changed at their source. One table paged on the server: the submissions' pages, then the documents'
- * (the page that ends the submissions fills up with documents). Select rows → Process (the Process dialog: topics
+ * (the page that ends the submissions fills up with documents). Select rows → Process (the Process dialog: concepts
  * and context for the run). While a run is in flight each of its documents shows its run task: waiting, the step it's
  * at (the track opens each step), the step it failed at, or processed (kept until the run ends: the pages aren't read
  * again meanwhile); no row fix while it waits or runs. The state pills filter on the server's processing state; Waiting
